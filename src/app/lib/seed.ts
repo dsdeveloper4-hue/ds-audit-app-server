@@ -1,3 +1,4 @@
+import config from '../config';
 // prisma/seed.ts
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
@@ -29,6 +30,16 @@ async function main() {
     { resource: "item", action: "read", name: "item:read" },
     { resource: "item", action: "update", name: "item:update" },
     { resource: "item", action: "delete", name: "item:delete" },
+    // Role permissions
+    { resource: "role", action: "create", name: "role:create" },
+    { resource: "role", action: "read", name: "role:read" },
+    { resource: "role", action: "update", name: "role:update" },
+    { resource: "role", action: "delete", name: "role:delete" },
+    // Permission permissions
+    { resource: "permission", action: "create", name: "permission:create" },
+    { resource: "permission", action: "read", name: "permission:read" },
+    { resource: "permission", action: "update", name: "permission:update" },
+    { resource: "permission", action: "delete", name: "permission:delete" },
   ];
 
   console.log("Creating permissions...");
@@ -44,7 +55,7 @@ async function main() {
 
   // Create roles
   console.log("Creating roles...");
-  
+
   // Admin role with all permissions
   const adminRole = await prisma.role.upsert({
     where: { name: "ADMIN" },
@@ -185,19 +196,18 @@ async function main() {
 
   // Create default admin user
   console.log("Creating default admin user...");
-  const hashedPassword = await bcrypt.hash("admin123", 10);
+  const hashedPassword = await bcrypt.hash("sajukhan", Number(config.salt_rounds));
   await prisma.user.upsert({
-    where: { mobile: "01700000000" },
+    where: { mobile: "01617134236" },
     update: {},
     create: {
-      name: "Admin User",
-      mobile: "01700000000",
+      name: "Shariful Islam Saju",
+      mobile: "01617134236",
       password: hashedPassword,
       role_id: adminRole.id,
     },
   });
-  console.log("✅ Created default admin user (mobile: 01700000000, password: admin123)");
-
+  console.log("✅ Created default admin user (mobile: 01617134236, password: sajukhan)");
   console.log("🎉 Database seed completed successfully!");
 }
 

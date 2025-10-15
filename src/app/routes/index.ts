@@ -4,6 +4,8 @@ import { userRouter } from "@app/modules/user/user.route";
 import { roomRouter } from "@app/modules/room/room.route";
 import { itemRouter } from "@app/modules/item/item.route";
 import { auditRouter } from "@app/modules/audit/audit.route";
+import { RoleRoutes } from "@app/modules/role/role.route";
+import { PermissionRoutes } from "@app/modules/permission/permission.route";
 import { Router } from "express";
 
 const router = Router();
@@ -33,6 +35,14 @@ const moduleRoutes: ModuleRoute[] = [
   {
     path: "/audits",
     route: auditRouter,
+  },
+  {
+    path: "/roles",
+    route: RoleRoutes,
+  },
+  {
+    path: "/permissions",
+    route: PermissionRoutes,
   },
 ];
 

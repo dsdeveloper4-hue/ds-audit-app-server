@@ -141,10 +141,10 @@ const refreshToken = async (
   }
 
    const jwtPayload = {
-     id: user.id,
-     roleName: user.role.id,
-     name: user.name,
-   };
+    id: user.id,
+    roleName: user.role.name,
+    name: user.name,
+  };
 
   const accessToken = jwtHelpers.generateToken(
     { ...jwtPayload },
