@@ -8,56 +8,37 @@ datasource db {
 }
 
 /*
-  USERS, ROLES & PERMISSIONS
+  ENUMS
+*/
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  USER
+}
+
+enum AuditStatus {
+  IN_PROGRESS
+  COMPLETED
+  CANCELED
+}
+
+/*
+  USERS
 */
 model User {
-  id           String       @id @default(uuid())
-  name         String
-  mobile       String       @unique
-  password     String
-  role_id      String
-  role         Role         @relation(fields: [role_id], references: [id], onDelete: Cascade)
-  created_at   DateTime     @default(now())
-  updated_at   DateTime     @updatedAt
+  id             String         @id @default(uuid())
+  name           String
+  mobile         String         @unique
+  password       String
+  role           Role           @default(USER)
+  created_at     DateTime       @default(now())
+  updated_at     DateTime       @updatedAt
 
   // Many-to-many relation with audits
-  audits       Audit[]      @relation("AuditParticipants")
+  audits         Audit[]        @relation("AuditParticipants")
 
   // Audit history actions
   auditHistories AuditHistory[]
-}
-
-model Role {
-  id           String             @id @default(uuid())
-  name         String             @unique
-  description  String?
-  users        User[]
-  permissions  RolePermission[]
-  created_at   DateTime           @default(now())
-  updated_at   DateTime           @updatedAt
-}
-
-model Permission {
-  id          String            @id @default(uuid())
-  name        String            @unique
-  resource    String
-  action      String
-  roles       RolePermission[]
-  created_at  DateTime          @default(now())
-  updated_at  DateTime          @default(now())
-
-  @@unique([resource, action])
-}
-
-model RolePermission {
-  id             String       @id @default(uuid())
-  role_id        String
-  permission_id  String
-  role           Role         @relation(fields: [role_id], references: [id], onDelete: Cascade)
-  permission     Permission   @relation(fields: [permission_id], references: [id], onDelete: Cascade)
-  created_at     DateTime     @default(now())
-
-  @@unique([role_id, permission_id])
 }
 
 /*
@@ -158,13 +139,4 @@ model AuditHistory {
   item    Item?   @relation(fields: [item_id], references: [id])
   room    Room?   @relation(fields: [room_id], references: [id])
   user    User    @relation(fields: [user_id], references: [id])
-}
-
-/*
-  ENUMS
-*/
-enum AuditStatus {
-  IN_PROGRESS
-  COMPLETED
-  CANCELED
 }

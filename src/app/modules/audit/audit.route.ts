@@ -2,36 +2,37 @@
 import { Router } from "express";
 import { auditController } from "./audit.controller";
 import auth from "@app/middlewares/auth";
-import checkPermission from "@app/middlewares/checkPermission";
+import { roleAuth } from "@app/middlewares/roleAuth";
+import { Role } from "@prisma/client";
 
 const router = Router();
 
-// Audit routes - all require authentication
+// Audit routes - role-based access
 router.post(
   "/",
   auth(),
-  checkPermission("audit", "create"),
+  roleAuth([Role.SUPER_ADMIN, Role.ADMIN]),
   auditController.createAudit
 );
 
 router.get(
   "/",
   auth(),
-  checkPermission("audit", "read"),
+  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
   auditController.getAllAudits
 );
 
 router.get(
   "/:id",
   auth(),
-  checkPermission("audit", "read"),
+  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
   auditController.getAuditById
 );
 
 router.patch(
   "/:id",
   auth(),
-  checkPermission("audit", "update"),
+  roleAuth([Role.SUPER_ADMIN, Role.ADMIN]),
   auditController.updateAudit
 );
 
@@ -39,28 +40,28 @@ router.patch(
 router.post(
   "/:audit_id/items",
   auth(),
-  checkPermission("audit", "update"),
+  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
   auditController.addItemDetailToAudit
 );
 
 router.patch(
   "/items/:detail_id",
   auth(),
-  checkPermission("audit", "update"),
+  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
   auditController.updateItemDetail
 );
 
 router.delete(
   "/items/:detail_id",
   auth(),
-  checkPermission("audit", "delete"),
+  roleAuth([Role.SUPER_ADMIN, Role.ADMIN]),
   auditController.deleteItemDetail
 );
 
 router.delete(
   "/:id",
   auth(),
-  checkPermission("audit", "delete"),
+  roleAuth([Role.SUPER_ADMIN, Role.ADMIN]),
   auditController.deleteAudit
 );
 

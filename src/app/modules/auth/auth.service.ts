@@ -7,14 +7,15 @@ import jwtHelpers from "@app/helpers/jwtHelpers";
 import config from "@app/config";
 import httpStatus from "http-status";
 import { AuthTokens } from "@app/types";
+import { Role } from "@prisma/client";
 
 // ---------------- REGISTER ----------------
 const register = async (req: Request): Promise<AuthTokens> => {
-  const { name, mobile, password, roleName } = req.body as {
+  const { name, mobile, password, role } = req.body as {
     name: string;
     mobile: string;
     password: string;
-    roleName?: string; // optional, default USER
+    role?: Role; // optional, default USER
   };
 
   if (!name || !mobile || !password) {
@@ -30,20 +31,16 @@ const register = async (req: Request): Promise<AuthTokens> => {
     throw new AppError(httpStatus.CONFLICT, "Mobile number already registered");
   }
 
+  // Validate role if provided
+  const userRole = role || Role.USER;
+  if (!Object.values(Role).includes(userRole)) {
+    throw new AppError(httpStatus.BAD_REQUEST, "Invalid role provided");
+  }
+
   const hashedPassword = await bcrypt.hash(
     password,
     Number(config.salt_rounds)
   );
-
-  // Find or create role
-  const role = await prisma.role.upsert({
-    where: { name: roleName || "USER" },
-    update: {},
-    create: {
-      name: roleName || "USER",
-      description: roleName === "ADMIN" ? "Admin role" : "Regular user role",
-    },
-  });
 
   // Create user with role
   const user = await prisma.user.create({
@@ -51,19 +48,18 @@ const register = async (req: Request): Promise<AuthTokens> => {
       name,
       mobile,
       password: hashedPassword,
-      role_id: role.id,
+      role: userRole,
     },
-    include: { role: true },
   });
 
   const accessToken = jwtHelpers.generateToken(
-    { id: user.id, roleName: user.role?.name },
+    { id: user.id, role: user.role },
     config.jwt.access_token_secret,
     Number(config.jwt.access_token_expires_in)
   );
 
   const refreshToken = jwtHelpers.generateToken(
-    { id: user.id, roleName: user.role?.name },
+    { id: user.id, role: user.role },
     config.jwt.refresh_token_secret,
     Number(config.jwt.refresh_token_expires_in)
   );
@@ -84,7 +80,6 @@ const login = async (req: Request): Promise<AuthTokens> => {
 
   const user = await prisma.user.findUnique({
     where: { mobile },
-    include: { role: true },
   });
 
   if (!user) {
@@ -96,7 +91,7 @@ const login = async (req: Request): Promise<AuthTokens> => {
     throw new AppError(httpStatus.UNAUTHORIZED, "Invalid mobile or password");
   }
 
- const jwtPayload = { id: user.id, roleName: user.role?.name, name: user.name };
+ const jwtPayload = { id: user.id, role: user.role, name: user.name };
 
   const accessToken = jwtHelpers.generateToken(
     { ...jwtPayload},
@@ -134,7 +129,6 @@ const refreshToken = async (
 
   const user = await prisma.user.findUnique({
     where: { id: decodedData.id },
-    include: { role: true },
   });
   if (!user) {
     throw new AppError(httpStatus.NOT_FOUND, "User not found");
@@ -142,7 +136,7 @@ const refreshToken = async (
 
    const jwtPayload = {
     id: user.id,
-    roleName: user.role.name,
+    role: user.role,
     name: user.name,
   };
 

@@ -2,43 +2,44 @@
 import { Router } from "express";
 import { itemController } from "./item.controller";
 import auth from "@app/middlewares/auth";
-import checkPermission from "@app/middlewares/checkPermission";
+import { roleAuth } from "@app/middlewares/roleAuth";
+import { Role } from "@prisma/client";
 
 const router = Router();
 
-// Item routes - all require authentication
+// Item routes - role-based access
 router.post(
   "/",
   auth(),
-  checkPermission("item", "create"),
+  roleAuth([Role.SUPER_ADMIN, Role.ADMIN]),
   itemController.createItem
 );
 
 router.get(
   "/",
   auth(),
-  checkPermission("item", "read"),
+  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
   itemController.getAllItems
 );
 
 router.get(
   "/:id",
   auth(),
-  checkPermission("item", "read"),
+  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
   itemController.getItemById
 );
 
 router.patch(
   "/:id",
   auth(),
-  checkPermission("item", "update"),
+  roleAuth([Role.SUPER_ADMIN, Role.ADMIN]),
   itemController.updateItem
 );
 
 router.delete(
   "/:id",
   auth(),
-  checkPermission("item", "delete"),
+  roleAuth([Role.SUPER_ADMIN, Role.ADMIN]),
   itemController.deleteItem
 );
 

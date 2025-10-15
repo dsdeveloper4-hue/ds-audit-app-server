@@ -2,43 +2,44 @@
 import { Router } from "express";
 import { roomController } from "./room.controller";
 import auth from "@app/middlewares/auth";
-import checkPermission from "@app/middlewares/checkPermission";
+import { roleAuth } from "@app/middlewares/roleAuth";
+import { Role } from "@prisma/client";
 
 const router = Router();
 
-// Room routes - all require authentication
+// Room routes - role-based access
 router.post(
   "/",
   auth(),
-  checkPermission("room", "create"),
+  roleAuth([Role.SUPER_ADMIN, Role.ADMIN]),
   roomController.createRoom
 );
 
 router.get(
   "/",
   auth(),
-  checkPermission("room", "read"),
+  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
   roomController.getAllRooms
 );
 
 router.get(
   "/:id",
   auth(),
-  checkPermission("room", "read"),
+  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
   roomController.getRoomById
 );
 
 router.patch(
   "/:id",
   auth(),
-  checkPermission("room", "update"),
+  roleAuth([Role.SUPER_ADMIN, Role.ADMIN]),
   roomController.updateRoom
 );
 
 router.delete(
   "/:id",
   auth(),
-  checkPermission("room", "delete"),
+  roleAuth([Role.SUPER_ADMIN, Role.ADMIN]),
   roomController.deleteRoom
 );
 
