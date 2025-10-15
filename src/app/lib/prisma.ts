@@ -13,6 +13,7 @@ async function main() {
       name: "Shariful Islam",
       mobile: "01617134236",
       password: hashedPassword,
+      role: "SUPER_ADMIN",
       // role field removed because it's not in schema
     },
   });
