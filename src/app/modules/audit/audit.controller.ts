@@ -11,7 +11,7 @@ const createAudit = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, {
     statusCode: httpStatus.CREATED,
     success: true,
-    message: `Audit created successfully with ${result.totalRecords} records!`,
+    message: "Audit created successfully!",
     data: result,
   });
 });
@@ -51,21 +51,45 @@ const updateAudit = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
-const completeAudit = catchAsync(async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const result = await auditService.completeAudit(id);
+const addItemDetailToAudit = catchAsync(async (req: Request, res: Response) => {
+  const { audit_id } = req.params;
+  const result = await auditService.addItemDetailToAudit(audit_id, req);
+
+  sendResponse(res, {
+    statusCode: httpStatus.CREATED,
+    success: true,
+    message: "Item added to audit successfully!",
+    data: result,
+  });
+});
+
+const updateItemDetail = catchAsync(async (req: Request, res: Response) => {
+  const { detail_id } = req.params;
+  const result = await auditService.updateItemDetail(detail_id, req);
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
-    message: "Audit completed successfully!",
+    message: "Item detail updated successfully!",
+    data: result,
+  });
+});
+
+const deleteItemDetail = catchAsync(async (req: Request, res: Response) => {
+  const { detail_id } = req.params;
+  const result = await auditService.deleteItemDetail(detail_id, req);
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: "Item detail deleted successfully!",
     data: result,
   });
 });
 
 const deleteAudit = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.params;
-  const result = await auditService.deleteAudit(id);
+  const result = await auditService.deleteAudit(id, req);
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -80,6 +104,8 @@ export const auditController = {
   getAllAudits,
   getAuditById,
   updateAudit,
-  completeAudit,
+  addItemDetailToAudit,
+  updateItemDetail,
+  deleteItemDetail,
   deleteAudit,
 };

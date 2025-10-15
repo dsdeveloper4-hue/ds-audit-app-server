@@ -7,9 +7,8 @@ import { Room } from "@prisma/client";
 
 // ---------------- CREATE ROOM ----------------
 const createRoom = async (req: Request): Promise<Room> => {
-  const { name, description, floor, department } = req.body as {
+  const { name, floor, department } = req.body as {
     name: string;
-    description?: string;
     floor?: string;
     department?: string;
   };
@@ -21,7 +20,6 @@ const createRoom = async (req: Request): Promise<Room> => {
   const room = await prisma.room.create({
     data: {
       name,
-      description,
       floor,
       department,
     },
@@ -38,7 +36,7 @@ const getAllRooms = async (): Promise<Room[]> => {
     },
     include: {
       _count: {
-        select: { inventories: true },
+        select: { itemDetails: true },
       },
     },
   });
@@ -51,9 +49,17 @@ const getRoomById = async (id: string): Promise<Room> => {
   const room = await prisma.room.findUnique({
     where: { id },
     include: {
-      inventories: {
+      itemDetails: {
         include: {
           item: true,
+          audit: {
+            select: {
+              id: true,
+              month: true,
+              year: true,
+              status: true,
+            },
+          },
         },
       },
     },
@@ -68,9 +74,8 @@ const getRoomById = async (id: string): Promise<Room> => {
 
 // ---------------- UPDATE ROOM ----------------
 const updateRoom = async (id: string, req: Request): Promise<Room> => {
-  const { name, description, floor, department } = req.body as {
+  const { name, floor, department } = req.body as {
     name?: string;
-    description?: string;
     floor?: string;
     department?: string;
   };
@@ -84,7 +89,6 @@ const updateRoom = async (id: string, req: Request): Promise<Room> => {
     where: { id },
     data: {
       ...(name && { name }),
-      ...(description !== undefined && { description }),
       ...(floor !== undefined && { floor }),
       ...(department !== undefined && { department }),
     },

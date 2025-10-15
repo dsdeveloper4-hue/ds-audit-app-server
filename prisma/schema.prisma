@@ -7,191 +7,164 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/*
+  USERS, ROLES & PERMISSIONS
+*/
 model User {
-  id            String              @id @default(uuid())
-  name          String
-  mobile        String              @unique
-  password      String
-  role_id       String?
-  role          Role?               @relation(fields: [role_id], references: [id])
-  history       InventoryHistory[]
-  audits        Audit[]             @relation("UserConductedAudits", fields: [], references: [])
-  created_at    DateTime            @default(now())
-  updated_at    DateTime            @updatedAt
+  id           String       @id @default(uuid())
+  name         String
+  mobile       String       @unique
+  password     String
+  role_id      String
+  role         Role         @relation(fields: [role_id], references: [id], onDelete: Cascade)
+  created_at   DateTime     @default(now())
+  updated_at   DateTime     @updatedAt
 
-  // back-relation from AuditRecordParticipant:
-  auditRecordParticipants AuditRecordParticipant[]
+  // Many-to-many relation with audits
+  audits       Audit[]      @relation("AuditParticipants")
+
+  // Audit history actions
+  auditHistories AuditHistory[]
 }
 
 model Role {
-  id          String             @id @default(uuid())
-  name        String             @unique
-  description String?
-  users       User[]
-  permissions RolePermission[]
-  created_at  DateTime           @default(now())
-  updated_at  DateTime           @updatedAt
+  id           String             @id @default(uuid())
+  name         String             @unique
+  description  String?
+  users        User[]
+  permissions  RolePermission[]
+  created_at   DateTime           @default(now())
+  updated_at   DateTime           @updatedAt
 }
 
 model Permission {
-  id          String             @id @default(uuid())
-  name        String             @unique
+  id          String            @id @default(uuid())
+  name        String            @unique
   resource    String
   action      String
   roles       RolePermission[]
-  created_at  DateTime           @default(now())
-  updated_at  DateTime           @updatedAt
+  created_at  DateTime          @default(now())
+  updated_at  DateTime          @default(now())
 
   @@unique([resource, action])
 }
 
 model RolePermission {
-  id            String      @id @default(uuid())
-  role_id       String
-  permission_id String
-  role          Role        @relation(fields: [role_id], references: [id], onDelete: Cascade)
-  permission    Permission  @relation(fields: [permission_id], references: [id], onDelete: Cascade)
-  created_at    DateTime    @default(now())
+  id             String       @id @default(uuid())
+  role_id        String
+  permission_id  String
+  role           Role         @relation(fields: [role_id], references: [id], onDelete: Cascade)
+  permission     Permission   @relation(fields: [permission_id], references: [id], onDelete: Cascade)
+  created_at     DateTime     @default(now())
 
   @@unique([role_id, permission_id])
 }
 
+/*
+  ROOMS & ITEMS
+*/
 model Room {
-  id          String       @id @default(uuid())
-  name        String
-  description String?
-  floor       String?
-  department  String?
-  inventories Inventory[]
-  created_at  DateTime     @default(now())
-  updated_at  DateTime     @updatedAt
+  id             String         @id @default(uuid())
+  name           String
+  floor          String?
+  department     String?
+  itemDetails    ItemDetails[]
+  auditHistories AuditHistory[]
+  created_at     DateTime       @default(now())
+  updated_at     DateTime       @updatedAt
 
   @@index([name])
 }
 
 model Item {
-  id          String       @id @default(uuid())
-  name        String
-  category    String
-  unit        String       // e.g., "pieces", "kg", "liters"
-  description String?
-  inventories Inventory[]
-  created_at  DateTime     @default(now())
-  updated_at  DateTime     @updatedAt
+  id             String         @id @default(uuid())
+  name           String
+  category       String?
+  unit           String?
+  description    String?
+  itemDetails    ItemDetails[]
+  auditHistories AuditHistory[]
+  created_at     DateTime       @default(now())
+  updated_at     DateTime       @updatedAt
 
   @@index([name])
   @@index([category])
 }
 
-// Inventory represents the master list of Room-Item combinations
-// When a new Audit is created, an AuditRecord is created for EACH Inventory record
-// This ensures every room has all items available for auditing
-model Inventory {
-  id                String            @id @default(uuid())
-  room_id           String
-  item_id           String
-  current_quantity  Int               @default(0) // Total quantity (updated after audit completion)
-  active_quantity   Int               @default(0) // Functional items
-  broken_quantity   Int               @default(0) // Damaged/non-functional
-  inactive_quantity Int               @default(0) // Not in use but functional
-  room              Room              @relation(fields: [room_id], references: [id], onDelete: Cascade)
-  item              Item              @relation(fields: [item_id], references: [id], onDelete: Cascade)
-  audit_records     AuditRecord[]     // Multiple audit records (one per audit)
-  history           InventoryHistory[]
-  created_at        DateTime          @default(now())
-  updated_at        DateTime          @updatedAt
-
-  @@unique([room_id, item_id]) // One inventory record per item per room
-  @@index([room_id])
-  @@index([item_id])
-}
-
-// When creating an Audit, AuditRecords should be auto-generated for ALL existing Inventory items
-// Each AuditRecord starts with recorded values at 0, ready to be filled in during the audit
+/*
+  AUDITS
+*/
 model Audit {
-  id           String        @id @default(uuid())
-  audit_date   DateTime      @default(now())
-  month        Int           // 1-12
-  year         Int
-  status       String        @default("in_progress") // in_progress, completed, reviewed
-  notes        String?
-  conducted_by String?
-  conductor    User?         @relation("UserConductedAudits", fields: [conducted_by], references: [id])
-  records      AuditRecord[] // Auto-generated for all Room-Item combinations (Inventory records)
-  created_at   DateTime      @default(now())
-  updated_at   DateTime      @updatedAt
+  id            String         @id @default(uuid())
+  month         Int
+  year          Int
+  status        AuditStatus    @default(IN_PROGRESS)
+  notes         String?
+  itemDetails   ItemDetails[]
+
+  // Participants: many-to-many with User
+  participants  User[]         @relation("AuditParticipants")
+
+  // Audit history entries
+  history       AuditHistory[]
+
+  created_at    DateTime       @default(now())
+  updated_at    DateTime       @updatedAt
 
   @@unique([month, year])
-  @@index([audit_date])
 }
 
-// Individual audit records - one per inventory item per audit
-// AUTO-GENERATED: When an Audit is created, create one AuditRecord for EACH Inventory (Room-Item pair)
-// All recorded values start at 0, user updates them during the audit (active, inactive, broken, etc.)
-// Next month's audit creates fresh AuditRecords with values reset to 0
-model AuditRecord {
-  id                      String                     @id @default(uuid())
-  audit_id                String
-  inventory_id            String                     // Links to Inventory (Room-Item combination)
-
-  // Recorded values during audit - START AT 0, updated by user during audit process
-  recorded_current        Int                        @default(0) // Total quantity counted
-  recorded_active         Int                        @default(0) // Active/functional items
-  recorded_broken         Int                        @default(0) // Damaged/broken items
-  recorded_inactive       Int                        @default(0) // Inactive but functional items
-
-  // optional notes for this record
-  notes                   String?
-
-  audit                   Audit                      @relation(fields: [audit_id], references: [id], onDelete: Cascade)
-  inventory               Inventory                  @relation(fields: [inventory_id], references: [id], onDelete: Cascade)
-
-  // participants join table (many users can participate in this record)
-  participants            AuditRecordParticipant[]
-
-  created_at              DateTime                   @default(now())
-  updated_at              DateTime                   @updatedAt
-
-  @@unique([audit_id, inventory_id]) // One record per inventory item per audit
-  @@index([audit_id])
-  @@index([inventory_id])
-}
-
-// join table for AuditRecord <-> User (participants)
-model AuditRecordParticipant {
-  id             String      @id @default(uuid())
-  audit_record_id String
-  user_id        String
-
-  audit_record   AuditRecord @relation(fields: [audit_record_id], references: [id], onDelete: Cascade)
-  user           User        @relation(fields: [user_id], references: [id], onDelete: Cascade)
-
-  created_at     DateTime    @default(now())
-
-  @@unique([audit_record_id, user_id])
-  @@index([user_id])
-  @@index([audit_record_id])
-}
-
-// ============================================
-// HISTORY & AUDIT TRAIL
-// ============================================
-
-model InventoryHistory {
+/*
+  ITEM DETAILS (junction table)
+*/
+model ItemDetails {
   id                String     @id @default(uuid())
-  inventory_id      String
-  user_id           String
-  change_type       String     // "adjustment", "transfer", "audit_correction", "initial"
-  field_changed     String     // "active", "broken", "inactive", "current"
-  previous_value    Int
-  new_value         Int
-  change_amount     Int
-  reason            String?
-  inventory         Inventory  @relation(fields: [inventory_id], references: [id], onDelete: Cascade)
-  user              User       @relation(fields: [user_id], references: [id])
-  created_at        DateTime   @default(now())
+  room_id           String
+  item_id           String
+  audit_id          String
+  active_quantity   Int        @default(0)
+  broken_quantity   Int        @default(0)
+  inactive_quantity Int        @default(0)
 
-  @@index([inventory_id])
-  @@index([user_id])
-  @@index([created_at])
+  room    Room     @relation(fields: [room_id], references: [id], onDelete: Cascade)
+  item    Item     @relation(fields: [item_id], references: [id], onDelete: Cascade)
+  audit   Audit    @relation(fields: [audit_id], references: [id], onDelete: Cascade)
+
+  created_at        DateTime   @default(now())
+  updated_at        DateTime   @updatedAt
+
+  @@unique([room_id, item_id, audit_id])
+  @@index([room_id])
+  @@index([item_id])
+  @@index([audit_id])
+}
+
+/*
+  AUDIT HISTORY
+*/
+model AuditHistory {
+  id            String     @id @default(uuid())
+  audit_id      String
+  item_id       String?
+  room_id       String?
+  user_id       String
+  change_type   String
+  old_value     String?
+  new_value     String?
+  description   String?
+  created_at    DateTime   @default(now())
+
+  audit   Audit   @relation(fields: [audit_id], references: [id], onDelete: Cascade)
+  item    Item?   @relation(fields: [item_id], references: [id])
+  room    Room?   @relation(fields: [room_id], references: [id])
+  user    User    @relation(fields: [user_id], references: [id])
+}
+
+/*
+  ENUMS
+*/
+enum AuditStatus {
+  IN_PROGRESS
+  COMPLETED
+  CANCELED
 }

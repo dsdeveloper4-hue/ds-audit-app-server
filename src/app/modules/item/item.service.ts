@@ -9,15 +9,15 @@ import { Item } from "@prisma/client";
 const createItem = async (req: Request): Promise<Item> => {
   const { name, category, unit, description } = req.body as {
     name: string;
-    category: string;
-    unit: string;
+    category?: string;
+    unit?: string;
     description?: string;
   };
 
-  if (!name || !category || !unit) {
+  if (!name ) {
     throw new AppError(
       httpStatus.BAD_REQUEST,
-      "Name, category, and unit are required"
+      "Name is required"
     );
   }
 
@@ -41,7 +41,7 @@ const getAllItems = async (): Promise<Item[]> => {
     },
     include: {
       _count: {
-        select: { inventories: true },
+        select: { itemDetails: true },
       },
     },
   });
@@ -54,9 +54,17 @@ const getItemById = async (id: string): Promise<Item> => {
   const item = await prisma.item.findUnique({
     where: { id },
     include: {
-      inventories: {
+      itemDetails: {
         include: {
           room: true,
+          audit: {
+            select: {
+              id: true,
+              month: true,
+              year: true,
+              status: true,
+            },
+          },
         },
       },
     },

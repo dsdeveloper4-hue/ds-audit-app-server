@@ -96,14 +96,16 @@ const login = async (req: Request): Promise<AuthTokens> => {
     throw new AppError(httpStatus.UNAUTHORIZED, "Invalid mobile or password");
   }
 
+ const jwtPayload = { id: user.id, roleName: user.role?.name, name: user.name };
+
   const accessToken = jwtHelpers.generateToken(
-    { id: user.id, roleName: user.role?.name },
+    { ...jwtPayload},
     config.jwt.access_token_secret,
     Number(config.jwt.access_token_expires_in)
   );
 
   const refreshToken = jwtHelpers.generateToken(
-    { id: user.id, roleName: user.role?.name },
+    { ...jwtPayload },
     config.jwt.refresh_token_secret,
     Number(config.jwt.refresh_token_expires_in)
   );
@@ -138,8 +140,14 @@ const refreshToken = async (
     throw new AppError(httpStatus.NOT_FOUND, "User not found");
   }
 
+   const jwtPayload = {
+     id: user.id,
+     roleName: user.role.id,
+     name: user.name,
+   };
+
   const accessToken = jwtHelpers.generateToken(
-    { id: user.id, roleName: user.role?.name },
+    { ...jwtPayload },
     config.jwt.access_token_secret,
     Number(config.jwt.access_token_expires_in)
   );

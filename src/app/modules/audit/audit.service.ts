@@ -3,17 +3,17 @@ import { Request } from "express";
 import AppError from "@app/errors/AppError";
 import prisma from "@app/lib/prisma";
 import httpStatus from "http-status";
-import { Audit } from "@prisma/client";
+import { Audit, User } from "@prisma/client";
 
 // ---------------- CREATE AUDIT ----------------
-// This automatically creates audit records for ALL existing inventory items
-// All values start at 0 and will be updated by the user during the audit
+// Creates an audit for a specific month/year
 const createAudit = async (req: Request): Promise<any> => {
-  const { month, year, notes, conducted_by } = req.body as {
+  const user = req.user as User;
+  const { month, year, notes, participant_ids } = req.body as {
     month: number;
     year: number;
     notes?: string;
-    conducted_by?: string;
+    participant_ids?: string[];
   };
 
   // Validate required fields
@@ -46,82 +46,31 @@ const createAudit = async (req: Request): Promise<any> => {
     );
   }
 
-  // Verify user exists if conducted_by is provided
-  if (conducted_by) {
-    const user = await prisma.user.findUnique({ where: { id: conducted_by } });
-    if (!user) {
-      throw new AppError(httpStatus.NOT_FOUND, "Conductor user not found");
+  // Verify participants exist if provided
+  if (participant_ids && participant_ids.length > 0) {
+    const users = await prisma.user.findMany({
+      where: { id: { in: participant_ids } },
+    });
+    if (users.length !== participant_ids.length) {
+      throw new AppError(httpStatus.NOT_FOUND, "One or more participants not found");
     }
   }
 
-  // Get all existing inventory records
-  const inventories = await prisma.inventory.findMany({
-    include: {
-      room: true,
-      item: true,
+  // Create the audit with participants
+  const audit = await prisma.audit.create({
+    data: {
+      month,
+      year,
+      notes,
+      status: "IN_PROGRESS",
+      participants: participant_ids
+        ? {
+            connect: participant_ids.map((id) => ({ id })),
+          }
+        : undefined,
     },
-  });
-
-  if (inventories.length === 0) {
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      "No inventory found. Please create inventory records first."
-    );
-  }
-
-  // Create audit and audit records in a transaction
-  const result = await prisma.$transaction(async (tx) => {
-    // Create the audit
-    const audit = await tx.audit.create({
-      data: {
-        month,
-        year,
-        notes,
-        conducted_by,
-        status: "in_progress",
-      },
-    });
-
-    // Create audit records for ALL inventory items
-    // All recorded values start at 0
-    const auditRecords = await Promise.all(
-      inventories.map((inventory) =>
-        tx.auditRecord.create({
-          data: {
-            audit_id: audit.id,
-            inventory_id: inventory.id,
-            recorded_current: 0,
-            recorded_active: 0,
-            recorded_broken: 0,
-            recorded_inactive: 0,
-          },
-          include: {
-            inventory: {
-              include: {
-                room: true,
-                item: true,
-              },
-            },
-          },
-        })
-      )
-    );
-
-    return {
-      audit,
-      auditRecords,
-      totalRecords: auditRecords.length,
-    };
-  });
-
-  return result;
-};
-
-// ---------------- GET ALL AUDITS ----------------
-const getAllAudits = async (): Promise<Audit[]> => {
-  const audits = await prisma.audit.findMany({
     include: {
-      conductor: {
+      participants: {
         select: {
           id: true,
           name: true,
@@ -129,7 +78,37 @@ const getAllAudits = async (): Promise<Audit[]> => {
         },
       },
       _count: {
-        select: { records: true },
+        select: { itemDetails: true },
+      },
+    },
+  });
+
+  // Log audit creation in history
+  await prisma.auditHistory.create({
+    data: {
+      audit_id: audit.id,
+      user_id: user.id,
+      change_type: "CREATED",
+      description: `Audit created for ${month}/${year}`,
+    },
+  });
+
+  return audit;
+};
+
+// ---------------- GET ALL AUDITS ----------------
+const getAllAudits = async (): Promise<Audit[]> => {
+  const audits = await prisma.audit.findMany({
+    include: {
+      participants: {
+        select: {
+          id: true,
+          name: true,
+          mobile: true,
+        },
+      },
+      _count: {
+        select: { itemDetails: true },
       },
     },
     orderBy: [{ year: "desc" }, { month: "desc" }],
@@ -143,37 +122,38 @@ const getAuditById = async (id: string): Promise<any> => {
   const audit = await prisma.audit.findUnique({
     where: { id },
     include: {
-      conductor: {
+      participants: {
         select: {
           id: true,
           name: true,
           mobile: true,
         },
       },
-      records: {
+      itemDetails: {
         include: {
-          inventory: {
-            include: {
-              room: true,
-              item: true,
-            },
-          },
-          participants: {
-            include: {
-              user: {
-                select: {
-                  id: true,
-                  name: true,
-                  mobile: true,
-                },
-              },
-            },
-          },
+          room: true,
+          item: true,
         },
         orderBy: [
-          { inventory: { room: { name: "asc" } } },
-          { inventory: { item: { name: "asc" } } },
+          { room: { name: "asc" } },
+          { item: { name: "asc" } },
         ],
+      },
+      history: {
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              mobile: true,
+            },
+          },
+          item: true,
+          room: true,
+        },
+        orderBy: {
+          created_at: "desc",
+        },
       },
     },
   });
@@ -182,31 +162,32 @@ const getAuditById = async (id: string): Promise<any> => {
     throw new AppError(httpStatus.NOT_FOUND, "Audit not found");
   }
 
-  // Group records by room for better organization
-  const recordsByRoom = audit.records.reduce((acc: any, record: any) => {
-    const roomName = record.inventory.room.name;
+  // Group item details by room for better organization
+  const detailsByRoom = audit.itemDetails.reduce((acc: any, detail: any) => {
+    const roomName = detail.room.name;
     if (!acc[roomName]) {
       acc[roomName] = {
-        room: record.inventory.room,
-        records: [],
+        room: detail.room,
+        items: [],
       };
     }
-    acc[roomName].records.push(record);
+    acc[roomName].items.push(detail);
     return acc;
   }, {});
 
   return {
     ...audit,
-    recordsByRoom: Object.values(recordsByRoom),
+    detailsByRoom: Object.values(detailsByRoom),
   };
 };
 
 // ---------------- UPDATE AUDIT ----------------
 const updateAudit = async (id: string, req: Request): Promise<Audit> => {
-  const { status, notes, conducted_by } = req.body as {
+  const user = req.user as User;
+  const { status, notes, participant_ids } = req.body as {
     status?: string;
     notes?: string;
-    conducted_by?: string;
+    participant_ids?: string[];
   };
 
   const audit = await prisma.audit.findUnique({ where: { id } });
@@ -214,31 +195,38 @@ const updateAudit = async (id: string, req: Request): Promise<Audit> => {
     throw new AppError(httpStatus.NOT_FOUND, "Audit not found");
   }
 
-  // Verify user exists if conducted_by is provided
-  if (conducted_by) {
-    const user = await prisma.user.findUnique({ where: { id: conducted_by } });
-    if (!user) {
-      throw new AppError(httpStatus.NOT_FOUND, "Conductor user not found");
+  // Verify participants exist if provided
+  if (participant_ids && participant_ids.length > 0) {
+    const users = await prisma.user.findMany({
+      where: { id: { in: participant_ids } },
+    });
+    if (users.length !== participant_ids.length) {
+      throw new AppError(httpStatus.NOT_FOUND, "One or more participants not found");
     }
   }
 
   // Validate status
-  if (status && !["in_progress", "completed", "reviewed"].includes(status)) {
+  if (status && !["IN_PROGRESS", "COMPLETED", "CANCELED"].includes(status)) {
     throw new AppError(
       httpStatus.BAD_REQUEST,
-      "Status must be in_progress, completed, or reviewed"
+      "Status must be IN_PROGRESS, COMPLETED, or CANCELED"
     );
   }
 
+  const oldStatus = audit.status;
   const updatedAudit = await prisma.audit.update({
     where: { id },
     data: {
-      ...(status && { status }),
+      ...(status && { status: status as any }),
       ...(notes !== undefined && { notes }),
-      ...(conducted_by !== undefined && { conducted_by }),
+      ...(participant_ids && {
+        participants: {
+          set: participant_ids.map((id) => ({ id })),
+        },
+      }),
     },
     include: {
-      conductor: {
+      participants: {
         select: {
           id: true,
           name: true,
@@ -246,94 +234,285 @@ const updateAudit = async (id: string, req: Request): Promise<Audit> => {
         },
       },
       _count: {
-        select: { records: true },
+        select: { itemDetails: true },
       },
     },
   });
+
+  // Log the update in history
+  if (status && status !== oldStatus) {
+    await prisma.auditHistory.create({
+      data: {
+        audit_id: audit.id,
+        user_id: user.id,
+        change_type: "STATUS_CHANGED",
+        old_value: oldStatus,
+        new_value: status,
+        description: `Status changed from ${oldStatus} to ${status}`,
+      },
+    });
+  }
 
   return updatedAudit;
 };
 
-// ---------------- COMPLETE AUDIT ----------------
-// When audit is completed, update inventory with the recorded values
-const completeAudit = async (id: string): Promise<any> => {
-  const audit = await prisma.audit.findUnique({
-    where: { id },
-    include: {
-      records: {
-        include: {
-          inventory: true,
-        },
-      },
-    },
-  });
+// ---------------- ADD ITEM DETAIL TO AUDIT ----------------
+// Add a new item detail (room-item combination) to an existing audit
+const addItemDetailToAudit = async (
+  audit_id: string,
+  req: Request
+): Promise<any> => {
+  const user = req.user as User;
+  const { room_id, item_id, active_quantity, broken_quantity, inactive_quantity } = req.body as {
+    room_id: string;
+    item_id: string;
+    active_quantity?: number;
+    broken_quantity?: number;
+    inactive_quantity?: number;
+  };
 
+  if (!room_id || !item_id) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      "Room ID and Item ID are required"
+    );
+  }
+
+  // Check if audit exists and is in progress
+  const audit = await prisma.audit.findUnique({ where: { id: audit_id } });
   if (!audit) {
     throw new AppError(httpStatus.NOT_FOUND, "Audit not found");
   }
 
-  if (audit.status === "completed") {
-    throw new AppError(httpStatus.BAD_REQUEST, "Audit is already completed");
+  if (audit.status !== "IN_PROGRESS") {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      "Can only add items to audits that are in progress"
+    );
   }
 
-  // Update audit status and inventory in a transaction
-  const result = await prisma.$transaction(async (tx) => {
-    // Update each inventory with the recorded values from audit
-    const updatedInventories = await Promise.all(
-      audit.records.map((record) =>
-        tx.inventory.update({
-          where: { id: record.inventory_id },
-          data: {
-            current_quantity: record.recorded_current,
-            active_quantity: record.recorded_active,
-            broken_quantity: record.recorded_broken,
-            inactive_quantity: record.recorded_inactive,
-          },
-        })
-      )
-    );
+  // Check if room exists
+  const room = await prisma.room.findUnique({ where: { id: room_id } });
+  if (!room) {
+    throw new AppError(httpStatus.NOT_FOUND, "Room not found");
+  }
 
-    // Mark audit as completed
-    const completedAudit = await tx.audit.update({
-      where: { id },
-      data: {
-        status: "completed",
-      },
-      include: {
-        conductor: {
-          select: {
-            id: true,
-            name: true,
-            mobile: true,
-          },
-        },
-        _count: {
-          select: { records: true },
-        },
-      },
-    });
+  // Check if item exists
+  const item = await prisma.item.findUnique({ where: { id: item_id } });
+  if (!item) {
+    throw new AppError(httpStatus.NOT_FOUND, "Item not found");
+  }
 
-    return {
-      audit: completedAudit,
-      updatedInventories: updatedInventories.length,
-    };
+  // Check if this combination already exists in the audit
+  const existing = await prisma.itemDetails.findUnique({
+    where: {
+      room_id_item_id_audit_id: {
+        room_id,
+        item_id,
+        audit_id,
+      },
+    },
   });
 
-  return result;
+  if (existing) {
+    throw new AppError(
+      httpStatus.CONFLICT,
+      "This room-item combination already exists in the audit"
+    );
+  }
+
+  const itemDetail = await prisma.itemDetails.create({
+    data: {
+      room_id,
+      item_id,
+      audit_id,
+      active_quantity: active_quantity ?? 0,
+      broken_quantity: broken_quantity ?? 0,
+      inactive_quantity: inactive_quantity ?? 0,
+    },
+    include: {
+      room: true,
+      item: true,
+    },
+  });
+
+  // Log the addition in history
+  await prisma.auditHistory.create({
+    data: {
+      audit_id,
+      user_id: user.id,
+      room_id,
+      item_id,
+      change_type: "ITEM_ADDED",
+      description: `Added ${item.name} to ${room.name}`,
+    },
+  });
+
+  return itemDetail;
+};
+
+// ---------------- UPDATE ITEM DETAIL ----------------
+// Update quantities for a specific item detail in an audit
+const updateItemDetail = async (
+  detail_id: string,
+  req: Request
+): Promise<any> => {
+  const user = req.user as User;
+  const { active_quantity, broken_quantity, inactive_quantity } = req.body as {
+    active_quantity?: number;
+    broken_quantity?: number;
+    inactive_quantity?: number;
+  };
+
+  // Get the item detail with audit info
+  const detail = await prisma.itemDetails.findUnique({
+    where: { id: detail_id },
+    include: {
+      audit: true,
+      room: true,
+      item: true,
+    },
+  });
+
+  if (!detail) {
+    throw new AppError(httpStatus.NOT_FOUND, "Item detail not found");
+  }
+
+  // Check if audit is still in progress
+  if (detail.audit.status !== "IN_PROGRESS") {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      "Cannot update items in a completed or canceled audit"
+    );
+  }
+
+  // Validate that values are non-negative
+  if (
+    (active_quantity !== undefined && active_quantity < 0) ||
+    (broken_quantity !== undefined && broken_quantity < 0) ||
+    (inactive_quantity !== undefined && inactive_quantity < 0)
+  ) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      "Quantities cannot be negative"
+    );
+  }
+
+  const oldValues = {
+    active: detail.active_quantity,
+    broken: detail.broken_quantity,
+    inactive: detail.inactive_quantity,
+  };
+
+  const updatedDetail = await prisma.itemDetails.update({
+    where: { id: detail_id },
+    data: {
+      ...(active_quantity !== undefined && { active_quantity }),
+      ...(broken_quantity !== undefined && { broken_quantity }),
+      ...(inactive_quantity !== undefined && { inactive_quantity }),
+    },
+    include: {
+      room: true,
+      item: true,
+      audit: true,
+    },
+  });
+
+  // Log the update in history
+  const changes = [];
+  if (active_quantity !== undefined && active_quantity !== oldValues.active) {
+    changes.push(`Active: ${oldValues.active} → ${active_quantity}`);
+  }
+  if (broken_quantity !== undefined && broken_quantity !== oldValues.broken) {
+    changes.push(`Broken: ${oldValues.broken} → ${broken_quantity}`);
+  }
+  if (inactive_quantity !== undefined && inactive_quantity !== oldValues.inactive) {
+    changes.push(`Inactive: ${oldValues.inactive} → ${inactive_quantity}`);
+  }
+
+  if (changes.length > 0) {
+    await prisma.auditHistory.create({
+      data: {
+        audit_id: detail.audit_id,
+        user_id: user.id,
+        room_id: detail.room_id,
+        item_id: detail.item_id,
+        change_type: "QUANTITY_UPDATED",
+        old_value: JSON.stringify(oldValues),
+        new_value: JSON.stringify({
+          active: updatedDetail.active_quantity,
+          broken: updatedDetail.broken_quantity,
+          inactive: updatedDetail.inactive_quantity,
+        }),
+        description: `Updated ${detail.item.name} in ${detail.room.name}: ${changes.join(", ")}`,
+      },
+    });
+  }
+
+  return updatedDetail;
+};
+
+// ---------------- DELETE ITEM DETAIL ----------------
+const deleteItemDetail = async (
+  detail_id: string,
+  req: Request
+): Promise<any> => {
+  const user = req.user as User;
+
+  const detail = await prisma.itemDetails.findUnique({
+    where: { id: detail_id },
+    include: {
+      audit: true,
+      room: true,
+      item: true,
+    },
+  });
+
+  if (!detail) {
+    throw new AppError(httpStatus.NOT_FOUND, "Item detail not found");
+  }
+
+  // Can only delete if audit is in progress
+  if (detail.audit.status !== "IN_PROGRESS") {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      "Cannot delete items from a completed or canceled audit"
+    );
+  }
+
+  await prisma.itemDetails.delete({
+    where: { id: detail_id },
+  });
+
+  // Log the deletion in history
+  await prisma.auditHistory.create({
+    data: {
+      audit_id: detail.audit_id,
+      user_id: user.id,
+      room_id: detail.room_id,
+      item_id: detail.item_id,
+      change_type: "ITEM_REMOVED",
+      description: `Removed ${detail.item.name} from ${detail.room.name}`,
+    },
+  });
+
+  return { message: "Item detail deleted successfully" };
 };
 
 // ---------------- DELETE AUDIT ----------------
-const deleteAudit = async (id: string): Promise<Audit> => {
+const deleteAudit = async (id: string, req: Request): Promise<Audit> => {
+  const user = req.user as User;
+
   const audit = await prisma.audit.findUnique({ where: { id } });
   if (!audit) {
     throw new AppError(httpStatus.NOT_FOUND, "Audit not found");
   }
 
   // Can only delete if status is in_progress
-  if (audit.status === "completed" || audit.status === "reviewed") {
+  if (audit.status === "COMPLETED") {
     throw new AppError(
       httpStatus.BAD_REQUEST,
-      "Cannot delete a completed or reviewed audit"
+      "Cannot delete a completed audit"
     );
   }
 
@@ -349,6 +528,8 @@ export const auditService = {
   getAllAudits,
   getAuditById,
   updateAudit,
-  completeAudit,
+  addItemDetailToAudit,
+  updateItemDetail,
+  deleteItemDetail,
   deleteAudit,
 };

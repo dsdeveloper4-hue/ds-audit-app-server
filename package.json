@@ -4,12 +4,17 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "ts-node -r tsconfig-paths/register src/server.ts"
+    "dev": "prisma generate && ts-node -r tsconfig-paths/register src/server.ts",
+    "build": "prisma generate && tsc",
+    "seed": "ts-node -r tsconfig-paths/register prisma/seed.ts"
   },
   "keywords": [],
   "author": "Shariful Islam",
   "license": "ISC",
   "packageManager": "pnpm@10.14.0",
+  "prisma": {
+    "seed": "ts-node -r tsconfig-paths/register prisma/seed.ts"
+  },
   "devDependencies": {
     "@types/bcryptjs": "^3.0.0",
     "@types/chalk": "^2.2.4",

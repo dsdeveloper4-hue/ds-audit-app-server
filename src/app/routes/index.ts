@@ -1,10 +1,9 @@
 // app/routes/index.ts
 import { authRouter } from "@app/modules/auth/auth.route";
+import { userRouter } from "@app/modules/user/user.route";
 import { roomRouter } from "@app/modules/room/room.route";
 import { itemRouter } from "@app/modules/item/item.route";
-import { inventoryRouter } from "@app/modules/inventory/inventory.route";
 import { auditRouter } from "@app/modules/audit/audit.route";
-import { auditRecordRouter } from "@app/modules/auditRecord/auditRecord.route";
 import { Router } from "express";
 
 const router = Router();
@@ -20,6 +19,10 @@ const moduleRoutes: ModuleRoute[] = [
     route: authRouter,
   },
   {
+    path: "/users",
+    route: userRouter,
+  },
+  {
     path: "/rooms",
     route: roomRouter,
   },
@@ -28,16 +31,8 @@ const moduleRoutes: ModuleRoute[] = [
     route: itemRouter,
   },
   {
-    path: "/inventories",
-    route: inventoryRouter,
-  },
-  {
     path: "/audits",
     route: auditRouter,
-  },
-  {
-    path: "/audit-records",
-    route: auditRecordRouter,
   },
 ];
 
