@@ -7,11 +7,10 @@ import { Item } from "@prisma/client";
 
 // ---------------- CREATE ITEM ----------------
 const createItem = async (req: Request): Promise<Item> => {
-  const { name, category, unit, description } = req.body as {
+  const { name, category, unit } = req.body as {
     name: string;
     category?: string;
     unit?: string;
-    description?: string;
   };
 
   if (!name ) {
@@ -26,7 +25,6 @@ const createItem = async (req: Request): Promise<Item> => {
       name,
       category,
       unit,
-      description,
     },
   });
 
@@ -79,11 +77,10 @@ const getItemById = async (id: string): Promise<Item> => {
 
 // ---------------- UPDATE ITEM ----------------
 const updateItem = async (id: string, req: Request): Promise<Item> => {
-  const { name, category, unit, description } = req.body as {
+  const { name, category, unit } = req.body as {
     name?: string;
     category?: string;
     unit?: string;
-    description?: string;
   };
 
   const item = await prisma.item.findUnique({ where: { id } });
@@ -97,7 +94,6 @@ const updateItem = async (id: string, req: Request): Promise<Item> => {
       ...(name && { name }),
       ...(category && { category }),
       ...(unit && { unit }),
-      ...(description !== undefined && { description }),
     },
   });
 

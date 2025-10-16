@@ -62,7 +62,6 @@ model Item {
   name           String
   category       String?
   unit           String?
-  description    String?
   itemDetails    ItemDetails[]
   auditHistories AuditHistory[]
   created_at     DateTime       @default(now())
