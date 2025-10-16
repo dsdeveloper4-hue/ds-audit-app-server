@@ -6,7 +6,15 @@ const prisma = new PrismaClient();
 async function main() {
   const hashedPassword = await bcrypt.hash("sajukhan", 10);
 
-  const superAdmin = await prisma.user.upsert({
+  const isSuperAdminExists = await prisma.user.findMany({
+    where: { role: "SUPER_ADMIN" },
+  });
+
+  if (isSuperAdminExists.length > 0) {
+    console.log("Super Admin already exists. Skipping creation.");
+    return;
+  }
+  await prisma.user.upsert({
     where: { mobile: "01617134236" },
     update: {},
     create: {
@@ -14,11 +22,9 @@ async function main() {
       mobile: "01617134236",
       password: hashedPassword,
       role: "SUPER_ADMIN",
-      // role field removed because it's not in schema
     },
   });
-
-  console.log("✅ Super Admin created successfully:", superAdmin);
+  console.log("Super Admin user created successfully.");
 }
 
 main()

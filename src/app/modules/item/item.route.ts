@@ -1,6 +1,7 @@
 // modules/item/item.route.ts
 import { Router } from "express";
 import { itemController } from "./item.controller";
+import { itemDetailsRouter } from "../itemDetails/itemDetails.route";
 import auth from "@app/middlewares/auth";
 import { roleAuth } from "@app/middlewares/roleAuth";
 import { Role } from "@prisma/client";
@@ -42,5 +43,8 @@ router.delete(
   roleAuth([Role.SUPER_ADMIN, Role.ADMIN]),
   itemController.deleteItem
 );
+
+// Mount ItemDetails routes under /details sub-route
+router.use("/details", itemDetailsRouter);
 
 export const itemRouter: Router = router;
