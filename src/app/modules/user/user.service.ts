@@ -10,13 +10,14 @@ import { User, Role } from "@prisma/client";
 // ---------------- CREATE USER ----------------
 const createUser = async (req: Request): Promise<Omit<User, "password">> => {
   const currentUser = req.user as User;
+  console.log("Current User:", currentUser);
   const { name, mobile, password, role } = req.body as {
     name: string;
     mobile: string;
     password: string;
     role: Role;
   };
-
+  console.log(req.body);
   if (!name || !mobile || !password || !role) {
     throw new AppError(
       httpStatus.BAD_REQUEST,
@@ -36,7 +37,10 @@ const createUser = async (req: Request): Promise<Omit<User, "password">> => {
   }
 
   // Admin role restrictions (handled in middleware but double-check here)
-  if (currentUser.role === 'ADMIN' && (role === 'ADMIN' || role === 'SUPER_ADMIN')) {
+  if (
+    currentUser.role === "ADMIN" &&
+    (role === "ADMIN" || role === "SUPER_ADMIN")
+  ) {
     throw new AppError(
       httpStatus.FORBIDDEN,
       "Admins cannot create other admins or super admins"
@@ -107,7 +111,10 @@ const updateUser = async (
   }
 
   // Admin role restrictions - cannot modify other admins or super admins
-  if (currentUser.role === 'ADMIN' && (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN')) {
+  if (
+    currentUser.role === "ADMIN" &&
+    (user.role === "ADMIN" || user.role === "SUPER_ADMIN")
+  ) {
     throw new AppError(
       httpStatus.FORBIDDEN,
       "Admins cannot modify other admins or super admins"
@@ -115,7 +122,11 @@ const updateUser = async (
   }
 
   // Admin role restrictions - cannot assign admin or super admin roles
-  if (currentUser.role === 'ADMIN' && role && (role === 'ADMIN' || role === 'SUPER_ADMIN')) {
+  if (
+    currentUser.role === "ADMIN" &&
+    role &&
+    (role === "ADMIN" || role === "SUPER_ADMIN")
+  ) {
     throw new AppError(
       httpStatus.FORBIDDEN,
       "Admins cannot assign admin or super admin roles"
@@ -159,7 +170,10 @@ const updateUser = async (
 };
 
 // ---------------- DELETE USER ----------------
-const deleteUser = async (id: string, req: Request): Promise<Omit<User, "password">> => {
+const deleteUser = async (
+  id: string,
+  req: Request
+): Promise<Omit<User, "password">> => {
   const currentUser = req.user as User;
   const user = await prisma.user.findUnique({ where: { id } });
   if (!user) {
@@ -167,7 +181,10 @@ const deleteUser = async (id: string, req: Request): Promise<Omit<User, "passwor
   }
 
   // Admin role restrictions - cannot delete other admins or super admins
-  if (currentUser.role === 'ADMIN' && (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN')) {
+  if (
+    currentUser.role === "ADMIN" &&
+    (user.role === "ADMIN" || user.role === "SUPER_ADMIN")
+  ) {
     throw new AppError(
       httpStatus.FORBIDDEN,
       "Admins cannot delete other admins or super admins"
@@ -187,13 +204,13 @@ const getAllRoles = async () => {
   // Return the available roles from the enum with user counts
   const roles = Object.values(Role).map(async (role) => {
     const userCount = await prisma.user.count({
-      where: { role }
+      where: { role },
     });
-    
+
     return {
       name: role,
       value: role,
-      userCount
+      userCount,
     };
   });
 
