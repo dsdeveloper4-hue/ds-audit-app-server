@@ -5,6 +5,7 @@ import { roomRouter } from "@app/modules/room/room.route";
 import { itemRouter } from "@app/modules/item/item.route";
 import { itemDetailsRouter } from "@app/modules/itemDetails/itemDetails.route";
 import { auditRouter } from "@app/modules/audit/audit.route";
+import { historyRoutes } from "@app/modules/history/history.route";
 import { Router } from "express";
 
 const router = Router();
@@ -38,6 +39,10 @@ const moduleRoutes: ModuleRoute[] = [
   {
     path: "/audits",
     route: auditRouter,
+  },
+  {
+    path: "/history",
+    route: historyRoutes,
   },
 ];
 

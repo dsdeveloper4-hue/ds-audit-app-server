@@ -22,50 +22,55 @@ enum AuditStatus {
   CANCELED
 }
 
+enum ActivityType {
+  CREATE
+  UPDATE
+  DELETE
+  READ
+}
+
 /*
   USERS
 */
 model User {
-  id             String         @id @default(uuid())
+  id             String                 @id @default(uuid())
   name           String
-  mobile         String         @unique
+  mobile         String                 @unique
   password       String
-  role           Role           @default(USER)
-  created_at     DateTime       @default(now())
-  updated_at     DateTime       @updatedAt
+  role           Role                   @default(USER)
+  created_at     DateTime               @default(now())
+  updated_at     DateTime               @updatedAt
 
   // Many-to-many relation with audits
-  audits         Audit[]        @relation("AuditParticipants")
+  audits         Audit[]                @relation("AuditParticipants")
 
-  // Audit history actions
-  auditHistories AuditHistory[]
+  // Linked user actions in RecentActivityHistory
+  activities     RecentActivityHistory[]
 }
 
 /*
   ROOMS & ITEMS
 */
 model Room {
-  id             String         @id @default(uuid())
+  id             String                 @id @default(uuid())
   name           String
   floor          String?
   department     String?
   itemDetails    ItemDetails[]
-  auditHistories AuditHistory[]
-  created_at     DateTime       @default(now())
-  updated_at     DateTime       @updatedAt
+  created_at     DateTime               @default(now())
+  updated_at     DateTime               @updatedAt
 
   @@index([name])
 }
 
 model Item {
-  id             String         @id @default(uuid())
+  id             String                 @id @default(uuid())
   name           String
   category       String?
   unit           String?
   itemDetails    ItemDetails[]
-  auditHistories AuditHistory[]
-  created_at     DateTime       @default(now())
-  updated_at     DateTime       @updatedAt
+  created_at     DateTime               @default(now())
+  updated_at     DateTime               @updatedAt
 
   @@index([name])
   @@index([category])
@@ -75,21 +80,18 @@ model Item {
   AUDITS
 */
 model Audit {
-  id            String         @id @default(uuid())
+  id            String                  @id @default(uuid())
   month         Int
   year          Int
-  status        AuditStatus    @default(IN_PROGRESS)
+  status        AuditStatus             @default(IN_PROGRESS)
   notes         String?
   itemDetails   ItemDetails[]
 
   // Participants: many-to-many with User
-  participants  User[]         @relation("AuditParticipants")
+  participants  User[]                  @relation("AuditParticipants")
 
-  // Audit history entries
-  history       AuditHistory[]
-
-  created_at    DateTime       @default(now())
-  updated_at    DateTime       @updatedAt
+  created_at    DateTime                @default(now())
+  updated_at    DateTime                @updatedAt
 
   @@unique([month, year])
 }
@@ -98,20 +100,20 @@ model Audit {
   ITEM DETAILS (junction table)
 */
 model ItemDetails {
-  id                String     @id @default(uuid())
+  id                String              @id @default(uuid())
   room_id           String
   item_id           String
   audit_id          String
-  active_quantity   Int        @default(0)
-  broken_quantity   Int        @default(0)
-  inactive_quantity Int        @default(0)
+  active_quantity   Int                 @default(0)
+  broken_quantity   Int                 @default(0)
+  inactive_quantity Int                 @default(0)
 
-  room    Room     @relation(fields: [room_id], references: [id], onDelete: Cascade)
-  item    Item     @relation(fields: [item_id], references: [id], onDelete: Cascade)
-  audit   Audit    @relation(fields: [audit_id], references: [id], onDelete: Cascade)
+  room    Room                           @relation(fields: [room_id], references: [id], onDelete: Cascade)
+  item    Item                           @relation(fields: [item_id], references: [id], onDelete: Cascade)
+  audit   Audit                          @relation(fields: [audit_id], references: [id], onDelete: Cascade)
 
-  created_at        DateTime   @default(now())
-  updated_at        DateTime   @updatedAt
+  created_at        DateTime             @default(now())
+  updated_at        DateTime             @updatedAt
 
   @@unique([room_id, item_id, audit_id])
   @@index([room_id])
@@ -120,22 +122,46 @@ model ItemDetails {
 }
 
 /*
-  AUDIT HISTORY
+  RECENT ACTIVITY HISTORY
 */
-model AuditHistory {
-  id            String     @id @default(uuid())
-  audit_id      String
-  item_id       String?
-  room_id       String?
-  user_id       String
-  change_type   String
-  old_value     String?
-  new_value     String?
-  description   String?
-  created_at    DateTime   @default(now())
+model RecentActivityHistory {
+  id              String      @id @default(uuid())
 
-  audit   Audit   @relation(fields: [audit_id], references: [id], onDelete: Cascade)
-  item    Item?   @relation(fields: [item_id], references: [id])
-  room    Room?   @relation(fields: [room_id], references: [id])
-  user    User    @relation(fields: [user_id], references: [id])
+  // WHO did the action
+  user_id         String?
+  user            User?       @relation(fields: [user_id], references: [id], onDelete: SetNull)
+
+  // WHEN it happened
+  occurred_at     DateTime    @default(now())
+
+  // WHAT kind of entity was affected (Room, Item, ItemDetails, Audit, etc.)
+  entity_type     String      // e.g. "Room", "Item", "ItemDetails", "Audit", "User"
+
+  // Human-friendly name for UI (optional)
+  entity_name     String?     // e.g. "Fan - Office 3"
+
+  // WHICH specific entity record
+  entity_id       String?
+
+  // WHAT ACTION happened
+  action_type     ActivityType
+
+  // Full before / after snapshots
+  before          Json?       // null for CREATE
+  after           Json?       // null for DELETE
+
+  // Compact diff summary
+  change_summary  Json?
+
+  // Short description for UI
+  description     String?
+
+  // Request/metadata info
+  metadata        Json?
+
+  created_at      DateTime    @default(now())
+
+  @@index([entity_type, entity_id])
+  @@index([user_id, occurred_at])
+  @@index([occurred_at])
 }

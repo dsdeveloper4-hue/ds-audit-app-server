@@ -3,7 +3,7 @@ import { Request } from "express";
 import AppError from "@app/errors/AppError";
 import prisma from "@app/lib/prisma";
 import httpStatus from "http-status";
-import { Item } from "@prisma/client";
+import { Item, User } from "@prisma/client";
 
 // ---------------- CREATE ITEM ----------------
 const createItem = async (req: Request): Promise<Item> => {
@@ -20,11 +20,26 @@ const createItem = async (req: Request): Promise<Item> => {
     );
   }
 
+  const user = req.user as User;
+
   const item = await prisma.item.create({
     data: {
       name,
       category,
       unit,
+    },
+  });
+
+  // Log creation in history
+  await prisma.recentActivityHistory.create({
+    data: {
+      user_id: user.id,
+      entity_type: "Item",
+      entity_id: item.id,
+      entity_name: item.name,
+      action_type: "CREATE",
+      after: item,
+      description: `Created item: ${item.name}`,
     },
   });
 
@@ -88,6 +103,9 @@ const updateItem = async (id: string, req: Request): Promise<Item> => {
     throw new AppError(httpStatus.NOT_FOUND, "Item not found");
   }
 
+  const user = req.user as User;
+  const before = { ...item };
+
   const updatedItem = await prisma.item.update({
     where: { id },
     data: {
@@ -97,11 +115,34 @@ const updateItem = async (id: string, req: Request): Promise<Item> => {
     },
   });
 
+  // Log update in history
+  const changes: string[] = [];
+  if (name && name !== item.name) changes.push(`name: ${item.name} → ${name}`);
+  if (category && category !== item.category) changes.push(`category: ${item.category} → ${category}`);
+  if (unit && unit !== item.unit) changes.push(`unit: ${item.unit} → ${unit}`);
+
+  if (changes.length > 0) {
+    await prisma.recentActivityHistory.create({
+      data: {
+        user_id: user.id,
+        entity_type: "Item",
+        entity_id: item.id,
+        entity_name: item.name,
+        action_type: "UPDATE",
+        before,
+        after: updatedItem,
+        change_summary: { changes },
+        description: `Updated item: ${changes.join(", ")}`,
+      },
+    });
+  }
+
   return updatedItem;
 };
 
 // ---------------- DELETE ITEM ----------------
-const deleteItem = async (id: string): Promise<Item> => {
+const deleteItem = async (id: string, req: Request): Promise<Item> => {
+  const user = req.user as User;
   const item = await prisma.item.findUnique({ where: { id } });
   if (!item) {
     throw new AppError(httpStatus.NOT_FOUND, "Item not found");
@@ -109,6 +150,19 @@ const deleteItem = async (id: string): Promise<Item> => {
 
   const deletedItem = await prisma.item.delete({
     where: { id },
+  });
+
+  // Log deletion in history
+  await prisma.recentActivityHistory.create({
+    data: {
+      user_id: user.id,
+      entity_type: "Item",
+      entity_id: item.id,
+      entity_name: item.name,
+      action_type: "DELETE",
+      before: item,
+      description: `Deleted item: ${item.name}`,
+    },
   });
 
   return deletedItem;

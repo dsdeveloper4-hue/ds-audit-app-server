@@ -61,6 +61,19 @@ const createUser = async (req: Request): Promise<Omit<User, "password">> => {
     },
   });
 
+  // Log creation in history
+  await prisma.recentActivityHistory.create({
+    data: {
+      user_id: currentUser.id,
+      entity_type: "User",
+      entity_id: user.id,
+      entity_name: user.name,
+      action_type: "CREATE",
+      after: { name: user.name, mobile: user.mobile, role: user.role },
+      description: `Created user: ${user.name} (${user.role})`,
+    },
+  });
+
   // Omit password from response
   const { password: _, ...userWithoutPassword } = user;
   return userWithoutPassword;
@@ -155,6 +168,8 @@ const updateUser = async (
     hashedPassword = await bcrypt.hash(password, Number(config.salt_rounds));
   }
 
+  const before = { name: user.name, mobile: user.mobile, role: user.role };
+
   const updatedUser = await prisma.user.update({
     where: { id },
     data: {
@@ -164,6 +179,29 @@ const updateUser = async (
       ...(hashedPassword && { password: hashedPassword }),
     },
   });
+
+  // Log update in history
+  const changes: string[] = [];
+  if (name && name !== user.name) changes.push(`name: ${user.name} → ${name}`);
+  if (mobile && mobile !== user.mobile) changes.push(`mobile: ${user.mobile} → ${mobile}`);
+  if (role && role !== user.role) changes.push(`role: ${user.role} → ${role}`);
+  if (password) changes.push(`password updated`);
+
+  if (changes.length > 0) {
+    await prisma.recentActivityHistory.create({
+      data: {
+        user_id: currentUser.id,
+        entity_type: "User",
+        entity_id: user.id,
+        entity_name: user.name,
+        action_type: "UPDATE",
+        before,
+        after: { name: updatedUser.name, mobile: updatedUser.mobile, role: updatedUser.role },
+        change_summary: { changes },
+        description: `Updated user: ${changes.join(", ")}`,
+      },
+    });
+  }
 
   const { password: _, ...userWithoutPassword } = updatedUser;
   return userWithoutPassword;
@@ -193,6 +231,19 @@ const deleteUser = async (
 
   const deletedUser = await prisma.user.delete({
     where: { id },
+  });
+
+  // Log deletion in history
+  await prisma.recentActivityHistory.create({
+    data: {
+      user_id: currentUser.id,
+      entity_type: "User",
+      entity_id: user.id,
+      entity_name: user.name,
+      action_type: "DELETE",
+      before: { name: user.name, mobile: user.mobile, role: user.role },
+      description: `Deleted user: ${user.name} (${user.role})`,
+    },
   });
 
   const { password, ...userWithoutPassword } = deletedUser;

@@ -3,7 +3,7 @@ import { Request } from "express";
 import AppError from "@app/errors/AppError";
 import prisma from "@app/lib/prisma";
 import httpStatus from "http-status";
-import { Room } from "@prisma/client";
+import { Room, User } from "@prisma/client";
 
 // ---------------- CREATE ROOM ----------------
 const createRoom = async (req: Request): Promise<Room> => {
@@ -17,11 +17,26 @@ const createRoom = async (req: Request): Promise<Room> => {
     throw new AppError(httpStatus.BAD_REQUEST, "Room name is required");
   }
 
+  const user = req.user as User;
+
   const room = await prisma.room.create({
     data: {
       name,
       floor,
       department,
+    },
+  });
+
+  // Log creation in history
+  await prisma.recentActivityHistory.create({
+    data: {
+      user_id: user.id,
+      entity_type: "Room",
+      entity_id: room.id,
+      entity_name: room.name,
+      action_type: "CREATE",
+      after: room,
+      description: `Created room: ${room.name}`,
     },
   });
 
@@ -85,6 +100,9 @@ const updateRoom = async (id: string, req: Request): Promise<Room> => {
     throw new AppError(httpStatus.NOT_FOUND, "Room not found");
   }
 
+  const user = req.user as User;
+  const before = { ...room };
+
   const updatedRoom = await prisma.room.update({
     where: { id },
     data: {
@@ -94,11 +112,34 @@ const updateRoom = async (id: string, req: Request): Promise<Room> => {
     },
   });
 
+  // Log update in history
+  const changes: string[] = [];
+  if (name && name !== room.name) changes.push(`name: ${room.name} → ${name}`);
+  if (floor !== undefined && floor !== room.floor) changes.push(`floor: ${room.floor} → ${floor}`);
+  if (department !== undefined && department !== room.department) changes.push(`department: ${room.department} → ${department}`);
+
+  if (changes.length > 0) {
+    await prisma.recentActivityHistory.create({
+      data: {
+        user_id: user.id,
+        entity_type: "Room",
+        entity_id: room.id,
+        entity_name: room.name,
+        action_type: "UPDATE",
+        before,
+        after: updatedRoom,
+        change_summary: { changes },
+        description: `Updated room: ${changes.join(", ")}`,
+      },
+    });
+  }
+
   return updatedRoom;
 };
 
 // ---------------- DELETE ROOM ----------------
-const deleteRoom = async (id: string): Promise<Room> => {
+const deleteRoom = async (id: string, req: Request): Promise<Room> => {
+  const user = req.user as User;
   const room = await prisma.room.findUnique({ where: { id } });
   if (!room) {
     throw new AppError(httpStatus.NOT_FOUND, "Room not found");
@@ -106,6 +147,19 @@ const deleteRoom = async (id: string): Promise<Room> => {
 
   const deletedRoom = await prisma.room.delete({
     where: { id },
+  });
+
+  // Log deletion in history
+  await prisma.recentActivityHistory.create({
+    data: {
+      user_id: user.id,
+      entity_type: "Room",
+      entity_id: room.id,
+      entity_name: room.name,
+      action_type: "DELETE",
+      before: room,
+      description: `Deleted room: ${room.name}`,
+    },
   });
 
   return deletedRoom;

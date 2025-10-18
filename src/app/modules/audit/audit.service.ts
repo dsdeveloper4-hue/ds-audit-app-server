@@ -84,11 +84,14 @@ const createAudit = async (req: Request): Promise<any> => {
   });
 
   // Log audit creation in history
-  await prisma.auditHistory.create({
+  await prisma.recentActivityHistory.create({
     data: {
-      audit_id: audit.id,
       user_id: user.id,
-      change_type: "CREATED",
+      entity_type: "Audit",
+      entity_id: audit.id,
+      entity_name: `Audit ${month}/${year}`,
+      action_type: "CREATE",
+      after: audit,
       description: `Audit created for ${month}/${year}`,
     },
   });
@@ -139,28 +142,34 @@ const getAuditById = async (id: string): Promise<any> => {
           { item: { name: "asc" } },
         ],
       },
-      history: {
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              mobile: true,
-            },
-          },
-          item: true,
-          room: true,
-        },
-        orderBy: {
-          created_at: "desc",
-        },
-      },
     },
   });
 
   if (!audit) {
     throw new AppError(httpStatus.NOT_FOUND, "Audit not found");
   }
+
+  // Fetch history for this audit from RecentActivityHistory
+  const history = await prisma.recentActivityHistory.findMany({
+    where: {
+      OR: [
+        { entity_type: "Audit", entity_id: id },
+        { entity_type: "ItemDetails", metadata: { path: ["audit_id"], equals: id } },
+      ],
+    },
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          mobile: true,
+        },
+      },
+    },
+    orderBy: {
+      occurred_at: "desc",
+    },
+  });
 
   // Group item details by room for better organization
   const detailsByRoom = audit.itemDetails.reduce((acc: any, detail: any) => {
@@ -177,6 +186,7 @@ const getAuditById = async (id: string): Promise<any> => {
 
   return {
     ...audit,
+    history,
     detailsByRoom: Object.values(detailsByRoom),
   };
 };
@@ -213,7 +223,12 @@ const updateAudit = async (id: string, req: Request): Promise<Audit> => {
     );
   }
 
+  const before = {
+    status: audit.status,
+    notes: audit.notes,
+  };
   const oldStatus = audit.status;
+
   const updatedAudit = await prisma.audit.update({
     where: { id },
     data: {
@@ -239,16 +254,33 @@ const updateAudit = async (id: string, req: Request): Promise<Audit> => {
     },
   });
 
-  // Log the update in history
+  // Log all updates in history
+  const changes: string[] = [];
   if (status && status !== oldStatus) {
-    await prisma.auditHistory.create({
+    changes.push(`Status: ${oldStatus} → ${status}`);
+  }
+  if (notes !== undefined && notes !== audit.notes) {
+    changes.push(`Notes updated`);
+  }
+  if (participant_ids) {
+    changes.push(`Participants updated`);
+  }
+
+  if (changes.length > 0) {
+    await prisma.recentActivityHistory.create({
       data: {
-        audit_id: audit.id,
         user_id: user.id,
-        change_type: "STATUS_CHANGED",
-        old_value: oldStatus,
-        new_value: status,
-        description: `Status changed from ${oldStatus} to ${status}`,
+        entity_type: "Audit",
+        entity_id: audit.id,
+        entity_name: `Audit ${audit.month}/${audit.year}`,
+        action_type: "UPDATE",
+        before,
+        after: {
+          status: updatedAudit.status,
+          notes: updatedAudit.notes,
+        },
+        change_summary: { changes },
+        description: `Audit updated: ${changes.join(", ")}`,
       },
     });
   }
@@ -337,14 +369,16 @@ const addItemDetailToAudit = async (
   });
 
   // Log the addition in history
-  await prisma.auditHistory.create({
+  await prisma.recentActivityHistory.create({
     data: {
-      audit_id,
       user_id: user.id,
-      room_id,
-      item_id,
-      change_type: "ITEM_ADDED",
-      description: `Added ${item.name} to ${room.name}`,
+      entity_type: "ItemDetails",
+      entity_id: itemDetail.id,
+      entity_name: `${item.name} - ${room.name}`,
+      action_type: "CREATE",
+      after: itemDetail,
+      description: `Added ${item.name} to ${room.name} in audit`,
+      metadata: { audit_id, room_id, item_id },
     },
   });
 
@@ -431,20 +465,22 @@ const updateItemDetail = async (
   }
 
   if (changes.length > 0) {
-    await prisma.auditHistory.create({
+    await prisma.recentActivityHistory.create({
       data: {
-        audit_id: detail.audit_id,
         user_id: user.id,
-        room_id: detail.room_id,
-        item_id: detail.item_id,
-        change_type: "QUANTITY_UPDATED",
-        old_value: JSON.stringify(oldValues),
-        new_value: JSON.stringify({
+        entity_type: "ItemDetails",
+        entity_id: detail.id,
+        entity_name: `${detail.item.name} - ${detail.room.name}`,
+        action_type: "UPDATE",
+        before: oldValues,
+        after: {
           active: updatedDetail.active_quantity,
           broken: updatedDetail.broken_quantity,
           inactive: updatedDetail.inactive_quantity,
-        }),
+        },
+        change_summary: { changes },
         description: `Updated ${detail.item.name} in ${detail.room.name}: ${changes.join(", ")}`,
+        metadata: { audit_id: detail.audit_id, room_id: detail.room_id, item_id: detail.item_id },
       },
     });
   }
@@ -485,14 +521,20 @@ const deleteItemDetail = async (
   });
 
   // Log the deletion in history
-  await prisma.auditHistory.create({
+  await prisma.recentActivityHistory.create({
     data: {
-      audit_id: detail.audit_id,
       user_id: user.id,
-      room_id: detail.room_id,
-      item_id: detail.item_id,
-      change_type: "ITEM_REMOVED",
+      entity_type: "ItemDetails",
+      entity_id: detail.id,
+      entity_name: `${detail.item.name} - ${detail.room.name}`,
+      action_type: "DELETE",
+      before: {
+        active_quantity: detail.active_quantity,
+        broken_quantity: detail.broken_quantity,
+        inactive_quantity: detail.inactive_quantity,
+      },
       description: `Removed ${detail.item.name} from ${detail.room.name}`,
+      metadata: { audit_id: detail.audit_id, room_id: detail.room_id, item_id: detail.item_id },
     },
   });
 
@@ -518,6 +560,24 @@ const deleteAudit = async (id: string, req: Request): Promise<Audit> => {
 
   const deletedAudit = await prisma.audit.delete({
     where: { id },
+  });
+
+  // Log audit deletion in history
+  await prisma.recentActivityHistory.create({
+    data: {
+      user_id: user.id,
+      entity_type: "Audit",
+      entity_id: audit.id,
+      entity_name: `Audit ${audit.month}/${audit.year}`,
+      action_type: "DELETE",
+      before: {
+        month: audit.month,
+        year: audit.year,
+        status: audit.status,
+        notes: audit.notes,
+      },
+      description: `Deleted audit for ${audit.month}/${audit.year}`,
+    },
   });
 
   return deletedAudit;

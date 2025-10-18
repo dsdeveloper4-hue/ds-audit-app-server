@@ -53,7 +53,7 @@ const updateItem = catchAsync(async (req: Request, res: Response) => {
 
 const deleteItem = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.params;
-  const result = await itemService.deleteItem(id);
+  const result = await itemService.deleteItem(id, req);
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
