@@ -39,7 +39,7 @@ const createItem = async (req: Request): Promise<Item> => {
       entity_name: item.name,
       action_type: "CREATE",
       after: item,
-      description: `Created item: ${item.name}`,
+      description: `Created item: ${item.name} (Category: ${item.category || 'N/A'}, Unit: ${item.unit || 'N/A'})`,
     },
   });
 

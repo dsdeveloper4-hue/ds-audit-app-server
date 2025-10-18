@@ -74,6 +74,8 @@ const createItemDetails = async (req: Request): Promise<ItemDetails> => {
   });
 
   // Log creation in history
+  const quantities = `Active: ${itemDetails.active_quantity}, Broken: ${itemDetails.broken_quantity}, Inactive: ${itemDetails.inactive_quantity}`;
+  
   await prisma.recentActivityHistory.create({
     data: {
       user_id: user.id,
@@ -82,7 +84,7 @@ const createItemDetails = async (req: Request): Promise<ItemDetails> => {
       entity_name: `${itemDetails.item.name} - ${itemDetails.room.name}`,
       action_type: "CREATE",
       after: itemDetails,
-      description: `Created item details: ${itemDetails.item.name} in ${itemDetails.room.name}`,
+      description: `Created item details: ${itemDetails.item.name} in ${itemDetails.room.name} (${quantities})`,
       metadata: { audit_id, room_id, item_id },
     },
   });

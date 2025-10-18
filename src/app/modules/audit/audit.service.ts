@@ -84,6 +84,9 @@ const createAudit = async (req: Request): Promise<any> => {
   });
 
   // Log audit creation in history
+  const participantCount = audit.participants?.length || 0;
+  const participantInfo = participantCount > 0 ? ` with ${participantCount} participant${participantCount > 1 ? 's' : ''}` : '';
+  
   await prisma.recentActivityHistory.create({
     data: {
       user_id: user.id,
@@ -92,7 +95,7 @@ const createAudit = async (req: Request): Promise<any> => {
       entity_name: `Audit ${month}/${year}`,
       action_type: "CREATE",
       after: audit,
-      description: `Audit created for ${month}/${year}`,
+      description: `Audit created for ${month}/${year} (Status: ${audit.status}${participantInfo})`,
     },
   });
 
@@ -369,6 +372,8 @@ const addItemDetailToAudit = async (
   });
 
   // Log the addition in history
+  const quantities = `Active: ${itemDetail.active_quantity}, Broken: ${itemDetail.broken_quantity}, Inactive: ${itemDetail.inactive_quantity}`;
+  
   await prisma.recentActivityHistory.create({
     data: {
       user_id: user.id,
@@ -377,7 +382,7 @@ const addItemDetailToAudit = async (
       entity_name: `${item.name} - ${room.name}`,
       action_type: "CREATE",
       after: itemDetail,
-      description: `Added ${item.name} to ${room.name} in audit`,
+      description: `Added ${item.name} to ${room.name} in audit (${quantities})`,
       metadata: { audit_id, room_id, item_id },
     },
   });

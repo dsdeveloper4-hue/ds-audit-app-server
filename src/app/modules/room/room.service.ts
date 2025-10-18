@@ -28,6 +28,11 @@ const createRoom = async (req: Request): Promise<Room> => {
   });
 
   // Log creation in history
+  const details = [];
+  if (room.floor) details.push(`Floor: ${room.floor}`);
+  if (room.department) details.push(`Department: ${room.department}`);
+  const detailsStr = details.length > 0 ? ` (${details.join(', ')})` : '';
+  
   await prisma.recentActivityHistory.create({
     data: {
       user_id: user.id,
@@ -36,7 +41,7 @@ const createRoom = async (req: Request): Promise<Room> => {
       entity_name: room.name,
       action_type: "CREATE",
       after: room,
-      description: `Created room: ${room.name}`,
+      description: `Created room: ${room.name}${detailsStr}`,
     },
   });
 
