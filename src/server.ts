@@ -1,4 +1,5 @@
 // server.ts
+import "module-alias/register";
 import app from "./app";
 import { Server } from "http";
 import config from "./app/config";

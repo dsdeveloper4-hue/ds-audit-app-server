@@ -7,12 +7,15 @@
     "dev": "nodemon --watch src --ext ts --exec ts-node -r tsconfig-paths/register src/server.ts",
     "build": "prisma generate && tsc",
     "seed": "ts-node -r tsconfig-paths/register src/app/lib/seed.ts",
-    "start": "prisma generate && node dist/server.js"
+    "start": "node -r module-alias/register dist/server.js"
   },
   "keywords": [],
   "author": "Shariful Islam",
   "license": "ISC",
   "packageManager": "pnpm@10.14.0",
+  "_moduleAliases": {
+    "@app": "dist/app"
+  },
   "devDependencies": {
     "@types/bcryptjs": "^3.0.0",
     "@types/chalk": "^2.2.4",
@@ -40,6 +43,7 @@
     "express": "^5.1.0",
     "http-status": "^2.1.0",
     "jsonwebtoken": "^9.0.2",
+    "module-alias": "^2.2.3",
     "pino": "^9.9.5"
   }
 }
