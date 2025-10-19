@@ -86,7 +86,7 @@ const createAudit = async (req: Request): Promise<any> => {
   // Log audit creation in history
   const participantCount = audit.participants?.length || 0;
   const participantInfo = participantCount > 0 ? ` with ${participantCount} participant${participantCount > 1 ? 's' : ''}` : '';
-  
+
   await prisma.recentActivityHistory.create({
     data: {
       user_id: user.id,
@@ -194,6 +194,82 @@ const getAuditById = async (id: string): Promise<any> => {
   };
 };
 
+// ---------------- GET LATEST AUDIT ----------------
+const getLatestAudit = async (): Promise<any> => {
+  const audit = await prisma.audit.findFirst({
+    include: {
+      participants: {
+        select: {
+          id: true,
+          name: true,
+          mobile: true,
+        },
+      },
+      itemDetails: {
+        include: {
+          room: true,
+          item: true,
+        },
+        orderBy: [
+          { room: { name: "asc" } },
+          { item: { name: "asc" } },
+        ],
+      },
+    },
+    orderBy: [
+      { year: "desc" },
+      { month: "desc" },
+      { created_at: "desc" },
+    ],
+  });
+
+  if (!audit) {
+    throw new AppError(httpStatus.NOT_FOUND, "No audits found");
+  }
+
+  const history = await prisma.recentActivityHistory.findMany({
+    where: {
+      OR: [
+        { entity_type: "Audit", entity_id: audit.id },
+        {
+          entity_type: "ItemDetails",
+          metadata: { path: ["audit_id"], equals: audit.id },
+        },
+      ],
+    },
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          mobile: true,
+        },
+      },
+    },
+    orderBy: {
+      occurred_at: "desc",
+    },
+  });
+
+  const detailsByRoom = audit.itemDetails.reduce((acc: any, detail: any) => {
+    const roomName = detail.room.name;
+    if (!acc[roomName]) {
+      acc[roomName] = {
+        room: detail.room,
+        items: [],
+      };
+    }
+    acc[roomName].items.push(detail);
+    return acc;
+  }, {} as Record<string, any>);
+
+  return {
+    ...audit,
+    history,
+    detailsByRoom: Object.values(detailsByRoom),
+  };
+};
+
 // ---------------- UPDATE AUDIT ----------------
 const updateAudit = async (id: string, req: Request): Promise<Audit> => {
   const user = req.user as User;
@@ -208,13 +284,16 @@ const updateAudit = async (id: string, req: Request): Promise<Audit> => {
     throw new AppError(httpStatus.NOT_FOUND, "Audit not found");
   }
 
-  // Verify participants exist if provided
+  // Verify participants exist if provided and not empty
   if (participant_ids && participant_ids.length > 0) {
     const users = await prisma.user.findMany({
       where: { id: { in: participant_ids } },
     });
     if (users.length !== participant_ids.length) {
-      throw new AppError(httpStatus.NOT_FOUND, "One or more participants not found");
+      throw new AppError(
+        httpStatus.NOT_FOUND,
+        "One or more participants not found"
+      );
     }
   }
 
@@ -232,17 +311,25 @@ const updateAudit = async (id: string, req: Request): Promise<Audit> => {
   };
   const oldStatus = audit.status;
 
+  // --- Prepare clean update data ---
+  const updateData: any = {};
+
+  if (status && status.trim() !== "") updateData.status = status as any;
+  if (notes && notes.trim() !== "") updateData.notes = notes;
+  if (participant_ids && participant_ids.length > 0) {
+    updateData.participants = {
+      set: participant_ids.map((id) => ({ id })),
+    };
+  }
+
+  // If there's nothing to update, just return the existing audit
+  if (Object.keys(updateData).length === 0) {
+    return audit;
+  }
+
   const updatedAudit = await prisma.audit.update({
     where: { id },
-    data: {
-      ...(status && { status: status as any }),
-      ...(notes !== undefined && { notes }),
-      ...(participant_ids && {
-        participants: {
-          set: participant_ids.map((id) => ({ id })),
-        },
-      }),
-    },
+    data: updateData,
     include: {
       participants: {
         select: {
@@ -257,18 +344,20 @@ const updateAudit = async (id: string, req: Request): Promise<Audit> => {
     },
   });
 
-  // Log all updates in history
+  // --- Build change log (ignore empty or unchanged fields) ---
   const changes: string[] = [];
-  if (status && status !== oldStatus) {
+
+  if (status && status.trim() !== "" && status !== oldStatus) {
     changes.push(`Status: ${oldStatus} → ${status}`);
   }
-  if (notes !== undefined && notes !== audit.notes) {
+  if (notes && notes.trim() !== "" && notes !== audit.notes) {
     changes.push(`Notes updated`);
   }
-  if (participant_ids) {
+  if (participant_ids && participant_ids.length > 0) {
     changes.push(`Participants updated`);
   }
 
+  // --- Only create history if there are real changes ---
   if (changes.length > 0) {
     await prisma.recentActivityHistory.create({
       data: {
@@ -290,6 +379,7 @@ const updateAudit = async (id: string, req: Request): Promise<Audit> => {
 
   return updatedAudit;
 };
+
 
 // ---------------- ADD ITEM DETAIL TO AUDIT ----------------
 // Add a new item detail (room-item combination) to an existing audit
@@ -373,7 +463,7 @@ const addItemDetailToAudit = async (
 
   // Log the addition in history
   const quantities = `Active: ${itemDetail.active_quantity}, Broken: ${itemDetail.broken_quantity}, Inactive: ${itemDetail.inactive_quantity}`;
-  
+
   await prisma.recentActivityHistory.create({
     data: {
       user_id: user.id,
@@ -592,6 +682,7 @@ export const auditService = {
   createAudit,
   getAllAudits,
   getAuditById,
+  getLatestAudit,
   updateAudit,
   addItemDetailToAudit,
   updateItemDetail,

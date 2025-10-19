@@ -23,6 +23,13 @@ router.get(
 );
 
 router.get(
+  "/latest",
+  auth(),
+  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
+  auditController.getLatestAudit
+);
+
+router.get(
   "/:id",
   auth(),
   roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),

@@ -16,6 +16,17 @@ const createAudit = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
+const getLatestAudit = catchAsync(async (_req: Request, res: Response) => {
+  const result = await auditService.getLatestAudit();
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: "Latest audit retrieved successfully!",
+    data: result,
+  });
+});
+
 const getAllAudits = catchAsync(async (_req: Request, res: Response) => {
   const result = await auditService.getAllAudits();
 
@@ -103,6 +114,7 @@ export const auditController = {
   createAudit,
   getAllAudits,
   getAuditById,
+  getLatestAudit,
   updateAudit,
   addItemDetailToAudit,
   updateItemDetail,
