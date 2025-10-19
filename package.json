@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "nodemon --watch src --ext ts --exec ts-node -r tsconfig-paths/register src/server.ts",
     "build": "prisma generate && tsc",
-    "seed": "ts-node -r tsconfig-paths/register src/app/lib/seed.ts"
+    "seed": "ts-node -r tsconfig-paths/register src/app/lib/seed.ts",
+    "start": "prisma generate && node dist/server.js"
   },
   "keywords": [],
   "author": "Shariful Islam",
