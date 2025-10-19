@@ -17,7 +17,6 @@ const createUser = async (req: Request): Promise<Omit<User, "password">> => {
     password: string;
     role: Role;
   };
-  console.log(req.body);
   if (!name || !mobile || !password || !role) {
     throw new AppError(
       httpStatus.BAD_REQUEST,
@@ -146,6 +145,12 @@ const updateUser = async (
     );
   }
 
+  if (currentUser.role === "SUPER_ADMIN" && role && role !== "SUPER_ADMIN") {
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      "Super Admins must remain Super Admins"
+    );
+  }
   // Check if mobile is being changed and already exists
   if (mobile && mobile !== user.mobile) {
     const existingUser = await prisma.user.findUnique({ where: { mobile } });
@@ -183,7 +188,8 @@ const updateUser = async (
   // Log update in history
   const changes: string[] = [];
   if (name && name !== user.name) changes.push(`name: ${user.name} → ${name}`);
-  if (mobile && mobile !== user.mobile) changes.push(`mobile: ${user.mobile} → ${mobile}`);
+  if (mobile && mobile !== user.mobile)
+    changes.push(`mobile: ${user.mobile} → ${mobile}`);
   if (role && role !== user.role) changes.push(`role: ${user.role} → ${role}`);
   if (password) changes.push(`password updated`);
 
@@ -196,7 +202,11 @@ const updateUser = async (
         entity_name: user.name,
         action_type: "UPDATE",
         before,
-        after: { name: updatedUser.name, mobile: updatedUser.mobile, role: updatedUser.role },
+        after: {
+          name: updatedUser.name,
+          mobile: updatedUser.mobile,
+          role: updatedUser.role,
+        },
         change_summary: { changes },
         description: `Updated user: ${changes.join(", ")}`,
       },
@@ -227,6 +237,10 @@ const deleteUser = async (
       httpStatus.FORBIDDEN,
       "Admins cannot delete other admins or super admins"
     );
+  }
+
+  if (user.role === "SUPER_ADMIN") {
+    throw new AppError(httpStatus.FORBIDDEN, "Super Admins cannot be deleted");
   }
 
   const deletedUser = await prisma.user.delete({
