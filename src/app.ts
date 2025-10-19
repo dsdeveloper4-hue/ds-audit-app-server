@@ -13,6 +13,7 @@ app.use(cookieParser());
 
 // CORS setup
 const allowedOrigins: string[] = [
+  "https://ds-audit-app-client.vercel.app",
   "http://localhost:3000",
   "http://localhost:3001",
 ];
