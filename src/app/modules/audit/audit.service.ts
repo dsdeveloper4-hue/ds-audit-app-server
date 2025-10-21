@@ -52,40 +52,140 @@ const createAudit = async (req: Request): Promise<any> => {
       where: { id: { in: participant_ids } },
     });
     if (users.length !== participant_ids.length) {
-      throw new AppError(httpStatus.NOT_FOUND, "One or more participants not found");
+      throw new AppError(
+        httpStatus.NOT_FOUND,
+        "One or more participants not found"
+      );
     }
   }
 
-  // Create the audit with participants
-  const audit = await prisma.audit.create({
-    data: {
-      month,
-      year,
-      notes,
-      status: "IN_PROGRESS",
-      participants: participant_ids
-        ? {
-            connect: participant_ids.map((id) => ({ id })),
-          }
-        : undefined,
-    },
+  const latestAudit = await prisma.audit.findFirst({
     include: {
       participants: {
         select: {
           id: true,
-          name: true,
-          mobile: true,
         },
       },
-      _count: {
-        select: { itemDetails: true },
+      itemDetails: {
+        select: {
+          room_id: true,
+          item_id: true,
+          active_quantity: true,
+          broken_quantity: true,
+          inactive_quantity: true,
+        },
       },
     },
+    orderBy: [{ year: "desc" }, { month: "desc" }, { created_at: "desc" }],
+  });
+
+  const hasProvidedParticipants = participant_ids && participant_ids.length > 0;
+  const participantConnect = hasProvidedParticipants
+    ? participant_ids.map((id) => ({ id }))
+    : latestAudit?.participants?.map((participant) => ({
+        id: participant.id,
+      })) ?? [];
+
+  const resolvedNotes =
+    notes !== undefined ? notes : latestAudit?.notes ?? undefined;
+
+  const audit = await prisma.$transaction(async (tx) => {
+    const createdAudit = await tx.audit.create({
+      data: {
+        month,
+        year,
+        status: "IN_PROGRESS",
+        notes: resolvedNotes,
+        participants:
+          participantConnect.length > 0
+            ? {
+                connect: participantConnect,
+              }
+            : undefined,
+      },
+    });
+
+    // Copy item details from previous audit or create with 0 values
+    if (latestAudit?.itemDetails && latestAudit.itemDetails.length > 0) {
+      // Previous audit exists - copy all item details with their quantities
+      await tx.itemDetails.createMany({
+        data: latestAudit.itemDetails.map((detail) => ({
+          audit_id: createdAudit.id,
+          room_id: detail.room_id,
+          item_id: detail.item_id,
+          active_quantity: detail.active_quantity,
+          broken_quantity: detail.broken_quantity,
+          inactive_quantity: detail.inactive_quantity,
+        })),
+      });
+    } else {
+      // No previous audit - create item details for all room-item combinations with 0 values
+      const rooms = await tx.room.findMany({ select: { id: true } });
+      const items = await tx.item.findMany({ select: { id: true } });
+
+      if (rooms.length > 0 && items.length > 0) {
+        const itemDetailsData = [];
+        for (const room of rooms) {
+          for (const item of items) {
+            itemDetailsData.push({
+              audit_id: createdAudit.id,
+              room_id: room.id,
+              item_id: item.id,
+              active_quantity: 0,
+              broken_quantity: 0,
+              inactive_quantity: 0,
+            });
+          }
+        }
+
+        if (itemDetailsData.length > 0) {
+          await tx.itemDetails.createMany({
+            data: itemDetailsData,
+          });
+        }
+      }
+    }
+
+    const finalAudit = await tx.audit.findUnique({
+      where: { id: createdAudit.id },
+      include: {
+        participants: {
+          select: {
+            id: true,
+            name: true,
+            mobile: true,
+          },
+        },
+        itemDetails: {
+          include: {
+            room: true,
+            item: true,
+          },
+        },
+        _count: {
+          select: { itemDetails: true },
+        },
+      },
+    });
+
+    if (!finalAudit) {
+      throw new AppError(
+        httpStatus.INTERNAL_SERVER_ERROR,
+        "Failed to create audit"
+      );
+    }
+
+    return finalAudit;
   });
 
   // Log audit creation in history
   const participantCount = audit.participants?.length || 0;
-  const participantInfo = participantCount > 0 ? ` with ${participantCount} participant${participantCount > 1 ? 's' : ''}` : '';
+  const participantInfo =
+    participantCount > 0
+      ? ` with ${participantCount} participant${
+          participantCount > 1 ? "s" : ""
+        }`
+      : "";
 
   await prisma.recentActivityHistory.create({
     data: {
@@ -99,7 +199,23 @@ const createAudit = async (req: Request): Promise<any> => {
     },
   });
 
-  return audit;
+  // Group item details by room for better organization (same as getAuditById)
+  const detailsByRoom = audit.itemDetails.reduce((acc: any, detail: any) => {
+    const roomName = detail.room.name;
+    if (!acc[roomName]) {
+      acc[roomName] = {
+        room: detail.room,
+        items: [],
+      };
+    }
+    acc[roomName].items.push(detail);
+    return acc;
+  }, {});
+
+  return {
+    ...audit,
+    detailsByRoom: Object.values(detailsByRoom),
+  };
 };
 
 // ---------------- GET ALL AUDITS ----------------
@@ -140,10 +256,7 @@ const getAuditById = async (id: string): Promise<any> => {
           room: true,
           item: true,
         },
-        orderBy: [
-          { room: { name: "asc" } },
-          { item: { name: "asc" } },
-        ],
+        orderBy: [{ room: { name: "asc" } }, { item: { name: "asc" } }],
       },
     },
   });
@@ -157,7 +270,10 @@ const getAuditById = async (id: string): Promise<any> => {
     where: {
       OR: [
         { entity_type: "Audit", entity_id: id },
-        { entity_type: "ItemDetails", metadata: { path: ["audit_id"], equals: id } },
+        {
+          entity_type: "ItemDetails",
+          metadata: { path: ["audit_id"], equals: id },
+        },
       ],
     },
     include: {
@@ -210,19 +326,13 @@ const getLatestAudit = async (): Promise<any> => {
           room: true,
           item: true,
         },
-        orderBy: [
-          { room: { name: "asc" } },
-          { item: { name: "asc" } },
-        ],
+        orderBy: [{ room: { name: "asc" } }, { item: { name: "asc" } }],
       },
     },
-    orderBy: [
-      { year: "desc" },
-      { month: "desc" },
-      { created_at: "desc" },
-    ],
+    orderBy: [{ year: "desc" }, { month: "desc" }, { created_at: "desc" }],
   });
 
+  // If no audit exists, return a default object instead of null
   if (!audit) {
     throw new AppError(httpStatus.NOT_FOUND, "No audits found");
   }
@@ -380,7 +490,6 @@ const updateAudit = async (id: string, req: Request): Promise<Audit> => {
   return updatedAudit;
 };
 
-
 // ---------------- ADD ITEM DETAIL TO AUDIT ----------------
 // Add a new item detail (room-item combination) to an existing audit
 const addItemDetailToAudit = async (
@@ -388,7 +497,13 @@ const addItemDetailToAudit = async (
   req: Request
 ): Promise<any> => {
   const user = req.user as User;
-  const { room_id, item_id, active_quantity, broken_quantity, inactive_quantity } = req.body as {
+  const {
+    room_id,
+    item_id,
+    active_quantity,
+    broken_quantity,
+    inactive_quantity,
+  } = req.body as {
     room_id: string;
     item_id: string;
     active_quantity?: number;
@@ -521,10 +636,7 @@ const updateItemDetail = async (
     (broken_quantity !== undefined && broken_quantity < 0) ||
     (inactive_quantity !== undefined && inactive_quantity < 0)
   ) {
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      "Quantities cannot be negative"
-    );
+    throw new AppError(httpStatus.BAD_REQUEST, "Quantities cannot be negative");
   }
 
   const oldValues = {
@@ -555,7 +667,10 @@ const updateItemDetail = async (
   if (broken_quantity !== undefined && broken_quantity !== oldValues.broken) {
     changes.push(`Broken: ${oldValues.broken} → ${broken_quantity}`);
   }
-  if (inactive_quantity !== undefined && inactive_quantity !== oldValues.inactive) {
+  if (
+    inactive_quantity !== undefined &&
+    inactive_quantity !== oldValues.inactive
+  ) {
     changes.push(`Inactive: ${oldValues.inactive} → ${inactive_quantity}`);
   }
 
@@ -574,8 +689,14 @@ const updateItemDetail = async (
           inactive: updatedDetail.inactive_quantity,
         },
         change_summary: { changes },
-        description: `Updated ${detail.item.name} in ${detail.room.name}: ${changes.join(", ")}`,
-        metadata: { audit_id: detail.audit_id, room_id: detail.room_id, item_id: detail.item_id },
+        description: `Updated ${detail.item.name} in ${
+          detail.room.name
+        }: ${changes.join(", ")}`,
+        metadata: {
+          audit_id: detail.audit_id,
+          room_id: detail.room_id,
+          item_id: detail.item_id,
+        },
       },
     });
   }
@@ -629,7 +750,11 @@ const deleteItemDetail = async (
         inactive_quantity: detail.inactive_quantity,
       },
       description: `Removed ${detail.item.name} from ${detail.room.name}`,
-      metadata: { audit_id: detail.audit_id, room_id: detail.room_id, item_id: detail.item_id },
+      metadata: {
+        audit_id: detail.audit_id,
+        room_id: detail.room_id,
+        item_id: detail.item_id,
+      },
     },
   });
 

@@ -39,9 +39,9 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check route
-app.get("/api/v1", (req: Request, res: Response) => {
+app.get("/", (req: Request, res: Response) => {
   res.send({
-    message: "Prototype App is running...",
+    message: "DS Audit App is running...",
   });
 });
 
