@@ -334,7 +334,7 @@ const getLatestAudit = async (): Promise<any> => {
 
   // If no audit exists, return a default object instead of null
   if (!audit) {
-    throw new AppError(httpStatus.NOT_FOUND, "No audits found");
+    return { message: "No audits found" };
   }
 
   const history = await prisma.recentActivityHistory.findMany({

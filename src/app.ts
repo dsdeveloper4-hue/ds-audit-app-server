@@ -41,8 +41,10 @@ app.use(express.urlencoded({ extended: true }));
 
 // Health check route
 app.get("/", (req: Request, res: Response) => {
+  const referrer = req.get("Referrer") || req.get("referer") || "";
   res.send({
     message: "DS Audit App is running...",
+    referrer,
   });
 });
 
