@@ -10,7 +10,6 @@ import { User, Role } from "@prisma/client";
 // ---------------- CREATE USER ----------------
 const createUser = async (req: Request): Promise<Omit<User, "password">> => {
   const currentUser = req.user as User;
-  console.log("Current User:", currentUser);
   const { name, mobile, password, role } = req.body as {
     name: string;
     mobile: string;
