@@ -1,11 +1,10 @@
 // server.ts
-import "module-alias/register";
+// import "module-alias/register";
 import app from "./app";
 import { Server } from "http";
 import config from "./app/config";
 
 async function main(): Promise<void> {
-
   const server: Server = app.listen(config.port, () => {
     console.log(`Server is running at http://localhost:${config.port}`);
   });
