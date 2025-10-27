@@ -30,6 +30,13 @@ router.get(
 );
 
 router.get(
+  "/:id/summary",
+  auth(),
+  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
+  auditController.getItemSummaryByAuditId
+);
+
+router.get(
   "/:id",
   auth(),
   roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
