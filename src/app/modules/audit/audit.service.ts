@@ -803,6 +803,95 @@ const deleteAudit = async (id: string, req: Request): Promise<Audit> => {
   return deletedAudit;
 };
 
+// ---------------- GET ITEM SUMMARY BY AUDIT ID ----------------
+// Returns aggregated totals per item across all rooms
+const getItemSummaryByAuditId = async (id: string): Promise<any> => {
+  console.log("🔍 [Backend] Getting item summary for audit ID:", id);
+  
+  const audit = await prisma.audit.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      month: true,
+      year: true,
+      status: true,
+    },
+  });
+
+  if (!audit) {
+    console.log("❌ [Backend] Audit not found:", id);
+    throw new AppError(httpStatus.NOT_FOUND, "Audit not found");
+  }
+
+  console.log("✅ [Backend] Audit found:", audit);
+
+  // Get all item details for this audit
+  const itemDetails = await prisma.itemDetails.findMany({
+    where: { audit_id: id },
+    include: {
+      item: {
+        select: {
+          id: true,
+          name: true,
+          category: true,
+          unit: true,
+        },
+      },
+    },
+  });
+
+  console.log(`📊 [Backend] Found ${itemDetails.length} item details`);
+
+  // Aggregate by item
+  const itemSummaryMap = new Map<string, any>();
+
+  itemDetails.forEach((detail) => {
+    const itemId = detail.item.id;
+    const itemName = detail.item.name;
+
+    if (!itemSummaryMap.has(itemId)) {
+      itemSummaryMap.set(itemId, {
+        item_id: itemId,
+        item_name: itemName,
+        category: detail.item.category,
+        unit: detail.item.unit,
+        active: 0,
+        inactive: 0,
+        damage: 0,
+        total: 0,
+      });
+    }
+
+    const summary = itemSummaryMap.get(itemId);
+    summary.active += detail.active_quantity;
+    summary.inactive += detail.inactive_quantity;
+    summary.damage += detail.broken_quantity;
+    summary.total += detail.active_quantity + detail.inactive_quantity + detail.broken_quantity;
+  });
+
+  // Convert map to array and sort by item name
+  const itemSummary = Array.from(itemSummaryMap.values()).sort((a, b) =>
+    a.item_name.localeCompare(b.item_name)
+  );
+
+  console.log(`✅ [Backend] Returning ${itemSummary.length} aggregated items`);
+  console.log("📦 [Backend] Summary data:", JSON.stringify(itemSummary, null, 2));
+
+  const result = {
+    audit: {
+      id: audit.id,
+      month: audit.month,
+      year: audit.year,
+      status: audit.status,
+    },
+    summary: itemSummary,
+  };
+
+  console.log("🚀 [Backend] Final response:", JSON.stringify(result, null, 2));
+  
+  return result;
+};
+
 export const auditService = {
   createAudit,
   getAllAudits,
@@ -813,4 +902,5 @@ export const auditService = {
   updateItemDetail,
   deleteItemDetail,
   deleteAudit,
+  getItemSummaryByAuditId,
 };

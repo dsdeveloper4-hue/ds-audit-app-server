@@ -110,6 +110,18 @@ const deleteAudit = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
+const getItemSummaryByAuditId = catchAsync(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const result = await auditService.getItemSummaryByAuditId(id);
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: "Item summary retrieved successfully!",
+    data: result,
+  });
+});
+
 export const auditController = {
   createAudit,
   getAllAudits,
@@ -120,4 +132,5 @@ export const auditController = {
   updateItemDetail,
   deleteItemDetail,
   deleteAudit,
+  getItemSummaryByAuditId,
 };

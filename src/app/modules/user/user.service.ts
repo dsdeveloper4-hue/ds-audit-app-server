@@ -122,6 +122,11 @@ const updateUser = async (
     throw new AppError(httpStatus.NOT_FOUND, "User not found");
   }
 
+  // SUPER_ADMIN cannot change their own role
+  if (currentUser.role === "SUPER_ADMIN" && currentUser.id === id && role) {
+    throw new AppError(httpStatus.FORBIDDEN, "You cannot change your own role");
+  }
+
   // Admin role restrictions - cannot modify other admins or super admins
   if (
     currentUser.role === "ADMIN" &&
@@ -145,12 +150,6 @@ const updateUser = async (
     );
   }
 
-  if (currentUser.role === "SUPER_ADMIN" && role && role !== "SUPER_ADMIN") {
-    throw new AppError(
-      httpStatus.FORBIDDEN,
-      "Super Admins must remain Super Admins"
-    );
-  }
   // Check if mobile is being changed and already exists
   if (mobile && mobile !== user.mobile) {
     const existingUser = await prisma.user.findUnique({ where: { mobile } });
