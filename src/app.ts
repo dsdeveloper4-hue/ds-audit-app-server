@@ -17,10 +17,12 @@ const allowedOrigins: string[] = [
   "http://31.97.205.224:9001",
   "http://localhost:3000",
   "http://localhost:3001",
+  "http://localhost:9001",
+
 ];
 
 const corsOptions: CorsOptions = {
-  origin: (origin, callback) => {
+        origin: (origin, callback) => {
     if (!origin) return callback(null, true); // Allow requests with no origin (like mobile apps)
 
     if (allowedOrigins.includes(origin)) {
