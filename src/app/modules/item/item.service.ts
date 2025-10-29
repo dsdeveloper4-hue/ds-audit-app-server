@@ -7,17 +7,19 @@ import { Item, User } from "@prisma/client";
 
 // ---------------- CREATE ITEM ----------------
 const createItem = async (req: Request): Promise<Item> => {
-  const { name, category, unit } = req.body as {
+  const { name, category, unit, unit_price } = req.body as {
     name: string;
     category?: string;
     unit?: string;
+    unit_price?: number;
   };
 
-  if (!name ) {
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      "Name is required"
-    );
+  if (!name) {
+    throw new AppError(httpStatus.BAD_REQUEST, "Name is required");
+  }
+
+  if (unit_price !== undefined && unit_price < 0) {
+    throw new AppError(httpStatus.BAD_REQUEST, "Unit price cannot be negative");
   }
 
   const user = req.user as User;
@@ -27,6 +29,7 @@ const createItem = async (req: Request): Promise<Item> => {
       name,
       category,
       unit,
+      unit_price: unit_price !== undefined ? unit_price : null,
     },
   });
 
@@ -39,7 +42,11 @@ const createItem = async (req: Request): Promise<Item> => {
       entity_name: item.name,
       action_type: "CREATE",
       after: item,
-      description: `Created item: ${item.name} (Category: ${item.category || 'N/A'}, Unit: ${item.unit || 'N/A'})`,
+      description: `Created item: ${item.name} (Category: ${
+        item.category || "N/A"
+      }, Unit: ${item.unit || "N/A"}, Price: ${
+        unit_price ? `$${unit_price}` : "N/A"
+      })`,
     },
   });
 
@@ -92,15 +99,20 @@ const getItemById = async (id: string): Promise<Item> => {
 
 // ---------------- UPDATE ITEM ----------------
 const updateItem = async (id: string, req: Request): Promise<Item> => {
-  const { name, category, unit } = req.body as {
+  const { name, category, unit, unit_price } = req.body as {
     name?: string;
     category?: string;
     unit?: string;
+    unit_price?: number;
   };
 
   const item = await prisma.item.findUnique({ where: { id } });
   if (!item) {
     throw new AppError(httpStatus.NOT_FOUND, "Item not found");
+  }
+
+  if (unit_price !== undefined && unit_price < 0) {
+    throw new AppError(httpStatus.BAD_REQUEST, "Unit price cannot be negative");
   }
 
   const user = req.user as User;
@@ -110,16 +122,21 @@ const updateItem = async (id: string, req: Request): Promise<Item> => {
     where: { id },
     data: {
       ...(name && { name }),
-      ...(category && { category }),
-      ...(unit && { unit }),
+      ...(category !== undefined && { category }),
+      ...(unit !== undefined && { unit }),
+      ...(unit_price !== undefined && { unit_price }),
     },
   });
 
   // Log update in history
   const changes: string[] = [];
   if (name && name !== item.name) changes.push(`name: ${item.name} → ${name}`);
-  if (category && category !== item.category) changes.push(`category: ${item.category} → ${category}`);
-  if (unit && unit !== item.unit) changes.push(`unit: ${item.unit} → ${unit}`);
+  if (category !== undefined && category !== item.category)
+    changes.push(`category: ${item.category} → ${category}`);
+  if (unit !== undefined && unit !== item.unit)
+    changes.push(`unit: ${item.unit} → ${unit}`);
+  if (unit_price !== undefined && unit_price !== Number(item.unit_price))
+    changes.push(`unit price: ${item.unit_price} → ${unit_price}`);
 
   if (changes.length > 0) {
     await prisma.recentActivityHistory.create({

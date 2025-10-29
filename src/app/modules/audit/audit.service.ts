@@ -561,6 +561,12 @@ const addItemDetailToAudit = async (
     );
   }
 
+  // Calculate price fields
+  const unitPrice = item.unit_price || 0;
+  const totalQuantity =
+    (active_quantity ?? 0) + (broken_quantity ?? 0) + (inactive_quantity ?? 0);
+  const totalPrice = Number(unitPrice) * totalQuantity;
+
   const itemDetail = await prisma.itemDetails.create({
     data: {
       room_id,
@@ -569,6 +575,8 @@ const addItemDetailToAudit = async (
       active_quantity: active_quantity ?? 0,
       broken_quantity: broken_quantity ?? 0,
       inactive_quantity: inactive_quantity ?? 0,
+      unit_price: unitPrice,
+      total_price: totalPrice,
     },
     include: {
       room: true,
@@ -645,12 +653,27 @@ const updateItemDetail = async (
     inactive: detail.inactive_quantity,
   };
 
+  // Calculate updated price fields
+  const newActiveQty =
+    active_quantity !== undefined ? active_quantity : detail.active_quantity;
+  const newBrokenQty =
+    broken_quantity !== undefined ? broken_quantity : detail.broken_quantity;
+  const newInactiveQty =
+    inactive_quantity !== undefined
+      ? inactive_quantity
+      : detail.inactive_quantity;
+  const unitPrice = detail.item.unit_price || 0;
+  const totalQuantity = newActiveQty + newBrokenQty + newInactiveQty;
+  const totalPrice = Number(unitPrice) * totalQuantity;
+
   const updatedDetail = await prisma.itemDetails.update({
     where: { id: detail_id },
     data: {
       ...(active_quantity !== undefined && { active_quantity }),
       ...(broken_quantity !== undefined && { broken_quantity }),
       ...(inactive_quantity !== undefined && { inactive_quantity }),
+      unit_price: unitPrice,
+      total_price: totalPrice,
     },
     include: {
       room: true,
@@ -807,7 +830,7 @@ const deleteAudit = async (id: string, req: Request): Promise<Audit> => {
 // Returns aggregated totals per item across all rooms
 const getItemSummaryByAuditId = async (id: string): Promise<any> => {
   console.log("🔍 [Backend] Getting item summary for audit ID:", id);
-  
+
   const audit = await prisma.audit.findUnique({
     where: { id },
     select: {
@@ -835,6 +858,7 @@ const getItemSummaryByAuditId = async (id: string): Promise<any> => {
           name: true,
           category: true,
           unit: true,
+          unit_price: true,
         },
       },
     },
@@ -848,6 +872,7 @@ const getItemSummaryByAuditId = async (id: string): Promise<any> => {
   itemDetails.forEach((detail) => {
     const itemId = detail.item.id;
     const itemName = detail.item.name;
+    const unitPrice = detail.unit_price || detail.item.unit_price || 0;
 
     if (!itemSummaryMap.has(itemId)) {
       itemSummaryMap.set(itemId, {
@@ -859,6 +884,8 @@ const getItemSummaryByAuditId = async (id: string): Promise<any> => {
         inactive: 0,
         damage: 0,
         total: 0,
+        unit_price: Number(unitPrice),
+        total_price: 0,
       });
     }
 
@@ -866,7 +893,12 @@ const getItemSummaryByAuditId = async (id: string): Promise<any> => {
     summary.active += detail.active_quantity;
     summary.inactive += detail.inactive_quantity;
     summary.damage += detail.broken_quantity;
-    summary.total += detail.active_quantity + detail.inactive_quantity + detail.broken_quantity;
+    const qty =
+      detail.active_quantity +
+      detail.inactive_quantity +
+      detail.broken_quantity;
+    summary.total += qty;
+    summary.total_price += qty * Number(unitPrice);
   });
 
   // Convert map to array and sort by item name
@@ -875,7 +907,10 @@ const getItemSummaryByAuditId = async (id: string): Promise<any> => {
   );
 
   console.log(`✅ [Backend] Returning ${itemSummary.length} aggregated items`);
-  console.log("📦 [Backend] Summary data:", JSON.stringify(itemSummary, null, 2));
+  console.log(
+    "📦 [Backend] Summary data:",
+    JSON.stringify(itemSummary, null, 2)
+  );
 
   const result = {
     audit: {
@@ -888,7 +923,7 @@ const getItemSummaryByAuditId = async (id: string): Promise<any> => {
   };
 
   console.log("🚀 [Backend] Final response:", JSON.stringify(result, null, 2));
-  
+
   return result;
 };
 

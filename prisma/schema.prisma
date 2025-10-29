@@ -46,6 +46,9 @@ model User {
 
   // Linked user actions in RecentActivityHistory
   activities     RecentActivityHistory[]
+  
+  // Asset purchases added by this user
+  assetPurchases AssetPurchase[]
 }
 
 /*
@@ -57,6 +60,7 @@ model Room {
   floor          String?
   department     String?
   itemDetails    ItemDetails[]
+  assetPurchases AssetPurchase[]
   created_at     DateTime               @default(now())
   updated_at     DateTime               @updatedAt
 
@@ -68,7 +72,9 @@ model Item {
   name           String
   category       String?
   unit           String?
+  unit_price     Decimal?               @db.Decimal(10, 2)
   itemDetails    ItemDetails[]
+  assetPurchases AssetPurchase[]
   created_at     DateTime               @default(now())
   updated_at     DateTime               @updatedAt
 
@@ -107,6 +113,8 @@ model ItemDetails {
   active_quantity   Int                 @default(0)
   broken_quantity   Int                 @default(0)
   inactive_quantity Int                 @default(0)
+  unit_price        Decimal?            @db.Decimal(10, 2)
+  total_price       Decimal?            @db.Decimal(10, 2)
 
   room    Room                           @relation(fields: [room_id], references: [id], onDelete: Cascade)
   item    Item                           @relation(fields: [item_id], references: [id], onDelete: Cascade)
@@ -119,6 +127,40 @@ model ItemDetails {
   @@index([room_id])
   @@index([item_id])
   @@index([audit_id])
+}
+
+/*
+  ASSET PURCHASES
+*/
+model AssetPurchase {
+  id              String      @id @default(uuid())
+  
+  // Asset details
+  room_id         String
+  item_id         String
+  quantity        Int
+  unit_price      Decimal     @db.Decimal(10, 2)
+  total_cost      Decimal     @db.Decimal(10, 2)
+  
+  // Purchase info
+  purchase_date   DateTime    @default(now())
+  notes           String?
+  
+  // Who added this
+  added_by        String?
+  user            User?       @relation(fields: [added_by], references: [id], onDelete: SetNull)
+  
+  // Relations
+  room            Room        @relation(fields: [room_id], references: [id], onDelete: Cascade)
+  item            Item        @relation(fields: [item_id], references: [id], onDelete: Cascade)
+  
+  created_at      DateTime    @default(now())
+  updated_at      DateTime    @updatedAt
+
+  @@index([room_id])
+  @@index([item_id])
+  @@index([purchase_date])
+  @@index([added_by])
 }
 
 /*
