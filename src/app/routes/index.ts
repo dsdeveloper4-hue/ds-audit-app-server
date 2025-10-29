@@ -6,6 +6,7 @@ import { itemRouter } from "@app/modules/item/item.route";
 import { itemDetailsRouter } from "@app/modules/itemDetails/itemDetails.route";
 import { auditRouter } from "@app/modules/audit/audit.route";
 import { historyRoutes } from "@app/modules/history/history.route";
+import { assetPurchaseRouter } from "@app/modules/assetPurchase/assetPurchase.route";
 import { Router } from "express";
 
 const router = Router();
@@ -43,6 +44,10 @@ const moduleRoutes: ModuleRoute[] = [
   {
     path: "/history",
     route: historyRoutes,
+  },
+  {
+    path: "/asset-purchases",
+    route: assetPurchaseRouter,
   },
 ];
 

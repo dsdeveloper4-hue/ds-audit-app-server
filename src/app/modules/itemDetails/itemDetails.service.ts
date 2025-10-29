@@ -75,7 +75,7 @@ const createItemDetails = async (req: Request): Promise<ItemDetails> => {
 
   // Log creation in history
   const quantities = `Active: ${itemDetails.active_quantity}, Broken: ${itemDetails.broken_quantity}, Inactive: ${itemDetails.inactive_quantity}`;
-  
+
   await prisma.recentActivityHistory.create({
     data: {
       user_id: user.id,
@@ -199,12 +199,31 @@ const updateItemDetails = async (
     inactive_quantity: itemDetails.inactive_quantity,
   };
 
+  // Calculate updated price fields
+  const newActiveQty =
+    active_quantity !== undefined
+      ? active_quantity
+      : itemDetails.active_quantity;
+  const newBrokenQty =
+    broken_quantity !== undefined
+      ? broken_quantity
+      : itemDetails.broken_quantity;
+  const newInactiveQty =
+    inactive_quantity !== undefined
+      ? inactive_quantity
+      : itemDetails.inactive_quantity;
+  const unitPrice = itemDetails.item.unit_price || 0;
+  const totalQuantity = newActiveQty + newBrokenQty + newInactiveQty;
+  const totalPrice = Number(unitPrice) * totalQuantity;
+
   const updatedItemDetails = await prisma.itemDetails.update({
     where: { id },
     data: {
       ...(active_quantity !== undefined && { active_quantity }),
       ...(broken_quantity !== undefined && { broken_quantity }),
       ...(inactive_quantity !== undefined && { inactive_quantity }),
+      unit_price: unitPrice,
+      total_price: totalPrice,
     },
     include: {
       room: true,
@@ -222,14 +241,25 @@ const updateItemDetails = async (
 
   // Log update in history
   const changes: string[] = [];
-  if (active_quantity !== undefined && active_quantity !== itemDetails.active_quantity) {
+  if (
+    active_quantity !== undefined &&
+    active_quantity !== itemDetails.active_quantity
+  ) {
     changes.push(`Active: ${itemDetails.active_quantity} → ${active_quantity}`);
   }
-  if (broken_quantity !== undefined && broken_quantity !== itemDetails.broken_quantity) {
+  if (
+    broken_quantity !== undefined &&
+    broken_quantity !== itemDetails.broken_quantity
+  ) {
     changes.push(`Broken: ${itemDetails.broken_quantity} → ${broken_quantity}`);
   }
-  if (inactive_quantity !== undefined && inactive_quantity !== itemDetails.inactive_quantity) {
-    changes.push(`Inactive: ${itemDetails.inactive_quantity} → ${inactive_quantity}`);
+  if (
+    inactive_quantity !== undefined &&
+    inactive_quantity !== itemDetails.inactive_quantity
+  ) {
+    changes.push(
+      `Inactive: ${itemDetails.inactive_quantity} → ${inactive_quantity}`
+    );
   }
 
   if (changes.length > 0) {
@@ -248,7 +278,11 @@ const updateItemDetails = async (
         },
         change_summary: { changes },
         description: `Updated item details: ${changes.join(", ")}`,
-        metadata: { audit_id: itemDetails.audit_id, room_id: itemDetails.room_id, item_id: itemDetails.item_id },
+        metadata: {
+          audit_id: itemDetails.audit_id,
+          room_id: itemDetails.room_id,
+          item_id: itemDetails.item_id,
+        },
       },
     });
   }
@@ -257,7 +291,10 @@ const updateItemDetails = async (
 };
 
 // ---------------- DELETE ITEM DETAILS ----------------
-const deleteItemDetails = async (id: string, req: Request): Promise<ItemDetails> => {
+const deleteItemDetails = async (
+  id: string,
+  req: Request
+): Promise<ItemDetails> => {
   const user = req.user as User;
   const itemDetails = await prisma.itemDetails.findUnique({
     where: { id },
@@ -288,7 +325,11 @@ const deleteItemDetails = async (id: string, req: Request): Promise<ItemDetails>
         inactive_quantity: itemDetails.inactive_quantity,
       },
       description: `Deleted item details: ${itemDetails.item.name} in ${itemDetails.room.name}`,
-      metadata: { audit_id: itemDetails.audit_id, room_id: itemDetails.room_id, item_id: itemDetails.item_id },
+      metadata: {
+        audit_id: itemDetails.audit_id,
+        room_id: itemDetails.room_id,
+        item_id: itemDetails.item_id,
+      },
     },
   });
 
