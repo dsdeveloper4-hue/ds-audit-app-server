@@ -829,7 +829,6 @@ const deleteAudit = async (id: string, req: Request): Promise<Audit> => {
 // ---------------- GET ITEM SUMMARY BY AUDIT ID ----------------
 // Returns aggregated totals per item across all rooms
 const getItemSummaryByAuditId = async (id: string): Promise<any> => {
-  console.log("🔍 [Backend] Getting item summary for audit ID:", id);
 
   const audit = await prisma.audit.findUnique({
     where: { id },
@@ -846,7 +845,6 @@ const getItemSummaryByAuditId = async (id: string): Promise<any> => {
     throw new AppError(httpStatus.NOT_FOUND, "Audit not found");
   }
 
-  console.log("✅ [Backend] Audit found:", audit);
 
   // Get all item details for this audit
   const itemDetails = await prisma.itemDetails.findMany({
@@ -864,7 +862,6 @@ const getItemSummaryByAuditId = async (id: string): Promise<any> => {
     },
   });
 
-  console.log(`📊 [Backend] Found ${itemDetails.length} item details`);
 
   // Aggregate by item
   const itemSummaryMap = new Map<string, any>();
@@ -906,11 +903,7 @@ const getItemSummaryByAuditId = async (id: string): Promise<any> => {
     a.item_name.localeCompare(b.item_name)
   );
 
-  console.log(`✅ [Backend] Returning ${itemSummary.length} aggregated items`);
-  console.log(
-    "📦 [Backend] Summary data:",
-    JSON.stringify(itemSummary, null, 2)
-  );
+
 
   const result = {
     audit: {
@@ -922,7 +915,6 @@ const getItemSummaryByAuditId = async (id: string): Promise<any> => {
     summary: itemSummary,
   };
 
-  console.log("🚀 [Backend] Final response:", JSON.stringify(result, null, 2));
 
   return result;
 };
