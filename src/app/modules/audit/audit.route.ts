@@ -50,6 +50,14 @@ router.patch(
   auditController.updateAudit
 );
 
+// Update adjustment percentage
+router.patch(
+  "/:id/adjustment",
+  auth(),
+  roleAuth([Role.SUPER_ADMIN, Role.ADMIN]),
+  auditController.updateAdjustment
+);
+
 // Item detail routes for audits
 router.post(
   "/:audit_id/items",

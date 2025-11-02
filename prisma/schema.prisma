@@ -86,18 +86,19 @@ model Item {
   AUDITS
 */
 model Audit {
-  id            String                  @id @default(uuid())
-  month         Int
-  year          Int
-  status        AuditStatus             @default(IN_PROGRESS)
-  notes         String?
-  itemDetails   ItemDetails[]
+  id                    String                  @id @default(uuid())
+  month                 Int
+  year                  Int
+  status                AuditStatus             @default(IN_PROGRESS)
+  notes                 String?
+  reduction_percentage  Decimal?                @db.Decimal(5, 2) @default(0.00)
+  itemDetails           ItemDetails[]
 
   // Participants: many-to-many with User
-  participants  User[]                  @relation("AuditParticipants")
+  participants          User[]                  @relation("AuditParticipants")
 
-  created_at    DateTime                @default(now())
-  updated_at    DateTime                @updatedAt
+  created_at            DateTime                @default(now())
+  updated_at            DateTime                @updatedAt
 
   @@unique([month, year])
 }

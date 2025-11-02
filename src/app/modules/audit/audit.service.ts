@@ -229,6 +229,12 @@ const getAllAudits = async (): Promise<Audit[]> => {
           mobile: true,
         },
       },
+      itemDetails: {
+        include: {
+          room: true,
+          item: true,
+        },
+      },
       _count: {
         select: { itemDetails: true },
       },
@@ -829,7 +835,6 @@ const deleteAudit = async (id: string, req: Request): Promise<Audit> => {
 // ---------------- GET ITEM SUMMARY BY AUDIT ID ----------------
 // Returns aggregated totals per item across all rooms
 const getItemSummaryByAuditId = async (id: string): Promise<any> => {
-
   const audit = await prisma.audit.findUnique({
     where: { id },
     select: {
@@ -844,7 +849,6 @@ const getItemSummaryByAuditId = async (id: string): Promise<any> => {
     console.log("❌ [Backend] Audit not found:", id);
     throw new AppError(httpStatus.NOT_FOUND, "Audit not found");
   }
-
 
   // Get all item details for this audit
   const itemDetails = await prisma.itemDetails.findMany({
@@ -862,14 +866,13 @@ const getItemSummaryByAuditId = async (id: string): Promise<any> => {
     },
   });
 
-
   // Aggregate by item
   const itemSummaryMap = new Map<string, any>();
 
   itemDetails.forEach((detail) => {
     const itemId = detail.item.id;
     const itemName = detail.item.name;
-    const unitPrice = detail.unit_price || detail.item.unit_price || 0;
+    const entryTotalPrice = Number(detail.total_price) || 0;
 
     if (!itemSummaryMap.has(itemId)) {
       itemSummaryMap.set(itemId, {
@@ -881,7 +884,6 @@ const getItemSummaryByAuditId = async (id: string): Promise<any> => {
         inactive: 0,
         damage: 0,
         total: 0,
-        unit_price: Number(unitPrice),
         total_price: 0,
       });
     }
@@ -895,15 +897,14 @@ const getItemSummaryByAuditId = async (id: string): Promise<any> => {
       detail.inactive_quantity +
       detail.broken_quantity;
     summary.total += qty;
-    summary.total_price += qty * Number(unitPrice);
+    // Sum the stored total_price from each entry (handles different prices per purchase)
+    summary.total_price += entryTotalPrice;
   });
 
   // Convert map to array and sort by item name
   const itemSummary = Array.from(itemSummaryMap.values()).sort((a, b) =>
     a.item_name.localeCompare(b.item_name)
   );
-
-
 
   const result = {
     audit: {
@@ -915,8 +916,113 @@ const getItemSummaryByAuditId = async (id: string): Promise<any> => {
     summary: itemSummary,
   };
 
-
   return result;
+};
+
+// ---------------- UPDATE ADJUSTMENT PERCENTAGE ----------------
+// Updates the reduction percentage for an audit
+const updateAdjustment = async (
+  audit_id: string,
+  req: Request
+): Promise<any> => {
+  const user = req.user as User;
+  const { reduction_percentage } = req.body as {
+    reduction_percentage: number;
+  };
+
+  // Validate reduction percentage
+  if (
+    reduction_percentage === undefined ||
+    reduction_percentage === null ||
+    typeof reduction_percentage !== "number"
+  ) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      "Reduction percentage is required and must be a number"
+    );
+  }
+
+  if (reduction_percentage < 0 || reduction_percentage > 100) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      "Reduction percentage must be between 0 and 100"
+    );
+  }
+
+  // Check if audit exists
+  const audit = await prisma.audit.findUnique({
+    where: { id: audit_id },
+    include: {
+      itemDetails: {
+        include: {
+          room: true,
+          item: true,
+        },
+      },
+    },
+  });
+
+  if (!audit) {
+    throw new AppError(httpStatus.NOT_FOUND, "Audit not found");
+  }
+
+  // Update the reduction percentage
+  const updatedAudit = await prisma.audit.update({
+    where: { id: audit_id },
+    data: {
+      reduction_percentage,
+    },
+    include: {
+      itemDetails: {
+        include: {
+          room: true,
+          item: true,
+        },
+      },
+      participants: {
+        select: {
+          id: true,
+          name: true,
+          mobile: true,
+        },
+      },
+    },
+  });
+
+  // Calculate total asset value
+  let totalAssetValue = 0;
+  updatedAudit.itemDetails.forEach((detail: any) => {
+    const activeQty = detail.active_quantity || 0;
+    const brokenQty = detail.broken_quantity || 0;
+    const inactiveQty = detail.inactive_quantity || 0;
+    const totalQty = activeQty + brokenQty + inactiveQty;
+
+    const itemTotalPrice = detail.total_price || 0;
+
+    if (totalQty > 0) {
+      const pricePerUnit = Number(itemTotalPrice) / totalQty;
+
+      // Active and Inactive: full price
+      totalAssetValue += activeQty * pricePerUnit;
+      totalAssetValue += inactiveQty * pricePerUnit;
+
+      // Broken: 95% of price (5% depreciation)
+      totalAssetValue += brokenQty * pricePerUnit * 0.95;
+    }
+  });
+
+  // Calculate adjusted value
+  const reductionAmount =
+    totalAssetValue * (Number(reduction_percentage) / 100);
+  const adjustedAssetValue = totalAssetValue - reductionAmount;
+
+  // Return audit with calculated values
+  return {
+    ...updatedAudit,
+    total_asset_value: Math.round(totalAssetValue * 100) / 100,
+    adjusted_asset_value: Math.round(adjustedAssetValue * 100) / 100,
+    reduction_amount: Math.round(reductionAmount * 100) / 100,
+  };
 };
 
 export const auditService = {
@@ -930,4 +1036,5 @@ export const auditService = {
   deleteItemDetail,
   deleteAudit,
   getItemSummaryByAuditId,
+  updateAdjustment,
 };
