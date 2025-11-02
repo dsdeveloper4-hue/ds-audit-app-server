@@ -105,32 +105,46 @@ const createAssetPurchase = async (req: Request): Promise<any> => {
       });
 
       if (existingItemDetail) {
-        // Update existing ItemDetails - add to inactive quantity
+        // Update existing ItemDetails - add to active quantity and update prices
+        const newActiveQty = existingItemDetail.active_quantity + quantity;
+        const existingTotalPrice = Number(existingItemDetail.total_price) || 0;
+        const newTotalPrice = existingTotalPrice + total_cost;
+        const totalQty =
+          newActiveQty +
+          existingItemDetail.broken_quantity +
+          existingItemDetail.inactive_quantity;
+        const newUnitPrice =
+          totalQty > 0 ? newTotalPrice / totalQty : unit_price;
+
         await tx.itemDetails.update({
           where: { id: existingItemDetail.id },
           data: {
-            inactive_quantity: existingItemDetail.inactive_quantity + quantity,
+            active_quantity: newActiveQty,
+            unit_price: newUnitPrice,
+            total_price: newTotalPrice,
           },
         });
 
         console.log(
-          `✅ Updated ItemDetails: Added ${quantity} to inactive quantity for ${item.name} in ${room.name}`
+          `✅ Updated ItemDetails: Added ${quantity} to active quantity for ${item.name} in ${room.name}. Total price: ${newTotalPrice}`
         );
       } else {
-        // Create new ItemDetails with inactive quantity
+        // Create new ItemDetails with active quantity and prices
         await tx.itemDetails.create({
           data: {
             room_id,
             item_id,
             audit_id: latestAudit.id,
-            active_quantity: 0,
+            active_quantity: quantity,
             broken_quantity: 0,
-            inactive_quantity: quantity,
+            inactive_quantity: 0,
+            unit_price: unit_price,
+            total_price: total_cost,
           },
         });
 
         console.log(
-          `✅ Created ItemDetails: ${quantity} ${item.name}(s) as inactive in ${room.name} for audit ${latestAudit.month}/${latestAudit.year}`
+          `✅ Created ItemDetails: ${quantity} ${item.name}(s) as active in ${room.name} for audit ${latestAudit.month}/${latestAudit.year}. Total price: ${total_cost}`
         );
       }
 
@@ -141,12 +155,14 @@ const createAssetPurchase = async (req: Request): Promise<any> => {
           entity_type: "ItemDetails",
           entity_name: `${item.name} - ${room.name}`,
           action_type: "UPDATE",
-          description: `Added ${quantity} ${item.name}(s) to audit ${latestAudit.month}/${latestAudit.year} as inactive items (from asset purchase)`,
+          description: `Added ${quantity} ${item.name}(s) to audit ${latestAudit.month}/${latestAudit.year} as active items (from asset purchase)`,
           metadata: {
             audit_id: latestAudit.id,
             room_id,
             item_id,
             quantity,
+            unit_price,
+            total_cost,
             source: "asset_purchase",
           },
         },
