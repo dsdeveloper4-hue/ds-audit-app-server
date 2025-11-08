@@ -50,6 +50,48 @@ const createItemDetails = async (req: Request): Promise<ItemDetails> => {
 
   const user = req.user as User;
 
+  // Get the item to fetch its price
+  const item = await prisma.item.findUnique({
+    where: { id: item_id },
+  });
+
+  if (!item) {
+    throw new AppError(httpStatus.NOT_FOUND, "Item not found");
+  }
+
+  // Get the most recent purchase price for this item
+  // Order by both created_at and purchase_date to ensure we get the absolute latest
+  const latestPurchase = await prisma.assetPurchase.findFirst({
+    where: { item_id },
+    orderBy: [{ created_at: "desc" }, { purchase_date: "desc" }],
+    select: { unit_price: true, purchase_date: true, created_at: true },
+  });
+
+  console.log("🔍 [createItemDetails] Item:", item.name);
+  console.log("🔍 [createItemDetails] Latest purchase:", latestPurchase);
+
+  // Use latest purchase price, fallback to item's unit_price, then 0
+  let unitPrice = 0;
+  if (latestPurchase?.unit_price) {
+    unitPrice = Number(latestPurchase.unit_price);
+    console.log(
+      "✅ [createItemDetails] Using latest purchase price:",
+      unitPrice
+    );
+  } else if (item.unit_price) {
+    unitPrice = Number(item.unit_price);
+    console.log(
+      "⚠️ [createItemDetails] No purchase found, using item master price:",
+      unitPrice
+    );
+  } else {
+    console.log("❌ [createItemDetails] WARNING: No price found!");
+  }
+
+  const totalQuantity =
+    (active_quantity || 0) + (broken_quantity || 0) + (inactive_quantity || 0);
+  const totalPrice = unitPrice * totalQuantity;
+
   const itemDetails = await prisma.itemDetails.create({
     data: {
       room_id,
@@ -58,6 +100,8 @@ const createItemDetails = async (req: Request): Promise<ItemDetails> => {
       active_quantity: active_quantity || 0,
       broken_quantity: broken_quantity || 0,
       inactive_quantity: inactive_quantity || 0,
+      unit_price: unitPrice,
+      total_price: totalPrice,
     },
     include: {
       room: true,
@@ -199,7 +243,7 @@ const updateItemDetails = async (
     inactive_quantity: itemDetails.inactive_quantity,
   };
 
-  // Calculate updated price fields
+  // Calculate updated quantities
   const newActiveQty =
     active_quantity !== undefined
       ? active_quantity
@@ -212,9 +256,27 @@ const updateItemDetails = async (
     inactive_quantity !== undefined
       ? inactive_quantity
       : itemDetails.inactive_quantity;
-  const unitPrice = itemDetails.item.unit_price || 0;
-  const totalQuantity = newActiveQty + newBrokenQty + newInactiveQty;
-  const totalPrice = Number(unitPrice) * totalQuantity;
+
+  const oldTotalQty =
+    itemDetails.active_quantity +
+    itemDetails.broken_quantity +
+    itemDetails.inactive_quantity;
+  const newTotalQty = newActiveQty + newBrokenQty + newInactiveQty;
+
+  // Proportionally adjust total_price based on quantity change
+  // This preserves the accurate purchase prices
+  let newTotalPrice = Number(itemDetails.total_price) || 0;
+
+  if (oldTotalQty > 0 && newTotalQty !== oldTotalQty) {
+    // Calculate price per unit from stored total_price
+    const pricePerUnit = newTotalPrice / oldTotalQty;
+    // Adjust total_price proportionally
+    newTotalPrice = pricePerUnit * newTotalQty;
+  }
+
+  // Calculate average unit_price for reference
+  const newUnitPrice =
+    newTotalQty > 0 ? newTotalPrice / newTotalQty : itemDetails.unit_price || 0;
 
   const updatedItemDetails = await prisma.itemDetails.update({
     where: { id },
@@ -222,8 +284,8 @@ const updateItemDetails = async (
       ...(active_quantity !== undefined && { active_quantity }),
       ...(broken_quantity !== undefined && { broken_quantity }),
       ...(inactive_quantity !== undefined && { inactive_quantity }),
-      unit_price: unitPrice,
-      total_price: totalPrice,
+      unit_price: newUnitPrice,
+      total_price: newTotalPrice,
     },
     include: {
       room: true,
