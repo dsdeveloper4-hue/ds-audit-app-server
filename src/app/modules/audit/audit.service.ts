@@ -73,6 +73,8 @@ const createAudit = async (req: Request): Promise<any> => {
           active_quantity: true,
           broken_quantity: true,
           inactive_quantity: true,
+          unit_price: true,
+          total_price: true,
         },
       },
     },
@@ -107,17 +109,40 @@ const createAudit = async (req: Request): Promise<any> => {
 
     // Copy item details from previous audit or create with 0 values
     if (latestAudit?.itemDetails && latestAudit.itemDetails.length > 0) {
-      // Previous audit exists - copy all item details with their quantities
+      // Previous audit exists - copy all item details with their quantities AND prices
+      console.log("📋 [createAudit] Copying items from previous audit...");
       await tx.itemDetails.createMany({
-        data: latestAudit.itemDetails.map((detail) => ({
-          audit_id: createdAudit.id,
-          room_id: detail.room_id,
-          item_id: detail.item_id,
-          active_quantity: detail.active_quantity,
-          broken_quantity: detail.broken_quantity,
-          inactive_quantity: detail.inactive_quantity,
-        })),
+        data: latestAudit.itemDetails.map((detail) => {
+          const unitPrice = detail.unit_price ? Number(detail.unit_price) : 0;
+          const totalPrice = detail.total_price
+            ? Number(detail.total_price)
+            : 0;
+
+          console.log(
+            `  ✓ Copying item: room=${detail.room_id}, item=${
+              detail.item_id
+            }, qty=${
+              detail.active_quantity +
+              detail.broken_quantity +
+              detail.inactive_quantity
+            }, unit_price=${unitPrice}, total_price=${totalPrice}`
+          );
+
+          return {
+            audit_id: createdAudit.id,
+            room_id: detail.room_id,
+            item_id: detail.item_id,
+            active_quantity: detail.active_quantity,
+            broken_quantity: detail.broken_quantity,
+            inactive_quantity: detail.inactive_quantity,
+            unit_price: unitPrice,
+            total_price: totalPrice,
+          };
+        }),
       });
+      console.log(
+        `✅ [createAudit] Successfully copied ${latestAudit.itemDetails.length} items with prices`
+      );
     } else {
       // No previous audit - create item details for all room-item combinations with 0 values
       const rooms = await tx.room.findMany({ select: { id: true } });
@@ -567,11 +592,52 @@ const addItemDetailToAudit = async (
     );
   }
 
-  // Calculate price fields
-  const unitPrice = item.unit_price || 0;
+  // Get the most recent purchase price for this item
+  // Order by both created_at and purchase_date to ensure we get the absolute latest
+  const latestPurchase = await prisma.assetPurchase.findFirst({
+    where: { item_id },
+    orderBy: [{ created_at: "desc" }, { purchase_date: "desc" }],
+    select: { unit_price: true, purchase_date: true, created_at: true },
+  });
+
+  console.log("🔍 [addItemDetailToAudit] Item:", item.name);
+  console.log("🔍 [addItemDetailToAudit] Latest purchase:", latestPurchase);
+  console.log(
+    "🔍 [addItemDetailToAudit] Latest purchase unit_price type:",
+    typeof latestPurchase?.unit_price
+  );
+  console.log("🔍 [addItemDetailToAudit] Item unit_price:", item.unit_price);
+  console.log(
+    "🔍 [addItemDetailToAudit] Item unit_price type:",
+    typeof item.unit_price
+  );
+
+  // Use latest purchase price, fallback to item's unit_price, then 0
+  // Convert Decimal to number properly
+  let unitPrice = 0;
+  if (latestPurchase?.unit_price) {
+    unitPrice = Number(latestPurchase.unit_price);
+    console.log("✅ Using latest purchase price:", unitPrice);
+  } else if (item.unit_price) {
+    unitPrice = Number(item.unit_price);
+    console.log("⚠️ No purchase found, using item master price:", unitPrice);
+  } else {
+    console.log(
+      "❌ WARNING: No price found! Item has no purchase history and no unit_price set!"
+    );
+    console.log(
+      "❌ Please add an asset purchase or set unit_price in item master"
+    );
+  }
+
   const totalQuantity =
     (active_quantity ?? 0) + (broken_quantity ?? 0) + (inactive_quantity ?? 0);
-  const totalPrice = Number(unitPrice) * totalQuantity;
+  const totalPrice = unitPrice * totalQuantity;
+
+  console.log("🔍 [addItemDetailToAudit] Final unit_price:", unitPrice);
+  console.log("🔍 [addItemDetailToAudit] Total quantity:", totalQuantity);
+  console.log("🔍 [addItemDetailToAudit] Total price:", totalPrice);
+  console.log("🔍 [addItemDetailToAudit] Saving to database...");
 
   const itemDetail = await prisma.itemDetails.create({
     data: {
@@ -589,6 +655,24 @@ const addItemDetailToAudit = async (
       item: true,
     },
   });
+
+  console.log("✅ [addItemDetailToAudit] Saved to database!");
+  console.log(
+    "✅ [addItemDetailToAudit] Saved unit_price:",
+    itemDetail.unit_price
+  );
+  console.log(
+    "✅ [addItemDetailToAudit] Saved total_price:",
+    itemDetail.total_price
+  );
+  console.log(
+    "✅ [addItemDetailToAudit] Saved unit_price type:",
+    typeof itemDetail.unit_price
+  );
+  console.log(
+    "✅ [addItemDetailToAudit] Saved total_price type:",
+    typeof itemDetail.total_price
+  );
 
   // Log the addition in history
   const quantities = `Active: ${itemDetail.active_quantity}, Broken: ${itemDetail.broken_quantity}, Inactive: ${itemDetail.inactive_quantity}`;
@@ -659,7 +743,7 @@ const updateItemDetail = async (
     inactive: detail.inactive_quantity,
   };
 
-  // Calculate updated price fields
+  // Calculate updated quantities
   const newActiveQty =
     active_quantity !== undefined ? active_quantity : detail.active_quantity;
   const newBrokenQty =
@@ -668,9 +752,25 @@ const updateItemDetail = async (
     inactive_quantity !== undefined
       ? inactive_quantity
       : detail.inactive_quantity;
-  const unitPrice = detail.item.unit_price || 0;
-  const totalQuantity = newActiveQty + newBrokenQty + newInactiveQty;
-  const totalPrice = Number(unitPrice) * totalQuantity;
+
+  const oldTotalQty =
+    detail.active_quantity + detail.broken_quantity + detail.inactive_quantity;
+  const newTotalQty = newActiveQty + newBrokenQty + newInactiveQty;
+
+  // Proportionally adjust total_price based on quantity change
+  // This preserves the accurate purchase prices
+  let newTotalPrice = Number(detail.total_price) || 0;
+
+  if (oldTotalQty > 0 && newTotalQty !== oldTotalQty) {
+    // Calculate price per unit from stored total_price
+    const pricePerUnit = newTotalPrice / oldTotalQty;
+    // Adjust total_price proportionally
+    newTotalPrice = pricePerUnit * newTotalQty;
+  }
+
+  // Calculate average unit_price for reference
+  const newUnitPrice =
+    newTotalQty > 0 ? newTotalPrice / newTotalQty : detail.unit_price || 0;
 
   const updatedDetail = await prisma.itemDetails.update({
     where: { id: detail_id },
@@ -678,8 +778,8 @@ const updateItemDetail = async (
       ...(active_quantity !== undefined && { active_quantity }),
       ...(broken_quantity !== undefined && { broken_quantity }),
       ...(inactive_quantity !== undefined && { inactive_quantity }),
-      unit_price: unitPrice,
-      total_price: totalPrice,
+      unit_price: newUnitPrice,
+      total_price: newTotalPrice,
     },
     include: {
       room: true,
@@ -866,7 +966,7 @@ const getItemSummaryByAuditId = async (id: string): Promise<any> => {
     },
   });
 
-  // Aggregate by item
+  // Aggregate by item NAME (not ID) to group all items with same name
   const itemSummaryMap = new Map<string, any>();
 
   itemDetails.forEach((detail) => {
@@ -874,9 +974,10 @@ const getItemSummaryByAuditId = async (id: string): Promise<any> => {
     const itemName = detail.item.name;
     const entryTotalPrice = Number(detail.total_price) || 0;
 
-    if (!itemSummaryMap.has(itemId)) {
-      itemSummaryMap.set(itemId, {
-        item_id: itemId,
+    // Use item name as key to group all items with same name together
+    if (!itemSummaryMap.has(itemName)) {
+      itemSummaryMap.set(itemName, {
+        item_id: itemId, // Use first item's ID
         item_name: itemName,
         category: detail.item.category,
         unit: detail.item.unit,
@@ -888,7 +989,7 @@ const getItemSummaryByAuditId = async (id: string): Promise<any> => {
       });
     }
 
-    const summary = itemSummaryMap.get(itemId);
+    const summary = itemSummaryMap.get(itemName);
     summary.active += detail.active_quantity;
     summary.inactive += detail.inactive_quantity;
     summary.damage += detail.broken_quantity;
