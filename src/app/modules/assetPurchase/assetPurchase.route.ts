@@ -3,6 +3,7 @@ import { Router } from "express";
 import { assetPurchaseController } from "./assetPurchase.controller";
 import auth from "@app/middlewares/auth";
 import { roleAuth } from "@app/middlewares/roleAuth";
+import upload from "@app/middlewares/upload";
 import { Role } from "@prisma/client";
 
 const router = Router();
@@ -12,6 +13,10 @@ router.post(
   "/",
   auth(),
   roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
+  upload.fields([
+    { name: "item_image", maxCount: 1 },
+    { name: "billing_image", maxCount: 1 },
+  ]),
   assetPurchaseController.createAssetPurchase
 );
 
@@ -40,6 +45,10 @@ router.patch(
   "/:id",
   auth(),
   roleAuth([Role.SUPER_ADMIN, Role.ADMIN]),
+  upload.fields([
+    { name: "item_image", maxCount: 1 },
+    { name: "billing_image", maxCount: 1 },
+  ]),
   assetPurchaseController.updateAssetPurchase
 );
 

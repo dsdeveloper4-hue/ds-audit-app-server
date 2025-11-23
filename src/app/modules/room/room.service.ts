@@ -7,8 +7,9 @@ import { Room, User } from "@prisma/client";
 
 // ---------------- CREATE ROOM ----------------
 const createRoom = async (req: Request): Promise<Room> => {
-  const { name, floor, department } = req.body as {
+  const { name, office_name, floor, department } = req.body as {
     name: string;
+    office_name?: string;
     floor?: string;
     department?: string;
   };
@@ -22,6 +23,7 @@ const createRoom = async (req: Request): Promise<Room> => {
   const room = await prisma.room.create({
     data: {
       name,
+      office_name,
       floor,
       department,
     },
@@ -29,10 +31,11 @@ const createRoom = async (req: Request): Promise<Room> => {
 
   // Log creation in history
   const details = [];
+  if (room.office_name) details.push(`Office: ${room.office_name}`);
   if (room.floor) details.push(`Floor: ${room.floor}`);
   if (room.department) details.push(`Department: ${room.department}`);
-  const detailsStr = details.length > 0 ? ` (${details.join(', ')})` : '';
-  
+  const detailsStr = details.length > 0 ? ` (${details.join(", ")})` : "";
+
   await prisma.recentActivityHistory.create({
     data: {
       user_id: user.id,
@@ -94,8 +97,9 @@ const getRoomById = async (id: string): Promise<Room> => {
 
 // ---------------- UPDATE ROOM ----------------
 const updateRoom = async (id: string, req: Request): Promise<Room> => {
-  const { name, floor, department } = req.body as {
+  const { name, office_name, floor, department } = req.body as {
     name?: string;
+    office_name?: string;
     floor?: string;
     department?: string;
   };
@@ -112,6 +116,7 @@ const updateRoom = async (id: string, req: Request): Promise<Room> => {
     where: { id },
     data: {
       ...(name && { name }),
+      ...(office_name !== undefined && { office_name }),
       ...(floor !== undefined && { floor }),
       ...(department !== undefined && { department }),
     },
@@ -120,8 +125,14 @@ const updateRoom = async (id: string, req: Request): Promise<Room> => {
   // Log update in history
   const changes: string[] = [];
   if (name && name !== room.name) changes.push(`name: ${room.name} → ${name}`);
-  if (floor !== undefined && floor !== room.floor) changes.push(`floor: ${room.floor} → ${floor}`);
-  if (department !== undefined && department !== room.department) changes.push(`department: ${room.department} → ${department}`);
+  if (office_name !== undefined && office_name !== room.office_name)
+    changes.push(
+      `office: ${room.office_name || "none"} → ${office_name || "none"}`
+    );
+  if (floor !== undefined && floor !== room.floor)
+    changes.push(`floor: ${room.floor} → ${floor}`);
+  if (department !== undefined && department !== room.department)
+    changes.push(`department: ${room.department} → ${department}`);
 
   if (changes.length > 0) {
     await prisma.recentActivityHistory.create({

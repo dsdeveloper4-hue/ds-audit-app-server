@@ -57,6 +57,7 @@ model User {
 model Room {
   id             String                 @id @default(uuid())
   name           String
+  office_name    String?
   floor          String?
   department     String?
   itemDetails    ItemDetails[]
@@ -65,14 +66,17 @@ model Room {
   updated_at     DateTime               @updatedAt
 
   @@index([name])
+  @@index([office_name])
 }
 
 model Item {
   id             String                 @id @default(uuid())
   name           String
   category       String?
+  sub_category   String?
   unit           String?
   unit_price     Decimal?               @db.Decimal(10, 2)
+  image_url      String?
   itemDetails    ItemDetails[]
   assetPurchases AssetPurchase[]
   created_at     DateTime               @default(now())
@@ -80,6 +84,7 @@ model Item {
 
   @@index([name])
   @@index([category])
+  @@index([sub_category])
 }
 
 /*
@@ -105,29 +110,45 @@ model Audit {
 
 /*
   ITEM DETAILS (junction table)
+  NOW TRACKS INDIVIDUAL ITEMS BY SERIAL NUMBER
 */
 model ItemDetails {
-  id                String              @id @default(uuid())
-  room_id           String
-  item_id           String
-  audit_id          String
-  active_quantity   Int                 @default(0)
-  broken_quantity   Int                 @default(0)
-  inactive_quantity Int                 @default(0)
-  unit_price        Decimal?            @db.Decimal(10, 2)
-  total_price       Decimal?            @db.Decimal(10, 2)
+  id                  String              @id @default(uuid())
+  room_id             String
+  item_id             String
+  audit_id            String
+  
+  // Serial number tracking - each record represents ONE item with a unique serial number
+  item_serial_no      String?             // Serial number from AssetPurchase
+  asset_purchase_id   String?             // Link to the AssetPurchase that created this item
+  
+  // Quantities - for serial-tracked items, these should always be 0 or 1
+  // For backward compatibility, aggregated records may have quantities > 1
+  active_quantity     Int                 @default(0)
+  broken_quantity     Int                 @default(0)
+  inactive_quantity   Int                 @default(0)
+  lost_quantity       Int                 @default(0)
+  
+  // Pricing - for serial-tracked items, this is the individual item's price
+  unit_price          Decimal?            @db.Decimal(10, 2)
+  total_price         Decimal?            @db.Decimal(10, 2)
 
-  room    Room                           @relation(fields: [room_id], references: [id], onDelete: Cascade)
-  item    Item                           @relation(fields: [item_id], references: [id], onDelete: Cascade)
-  audit   Audit                          @relation(fields: [audit_id], references: [id], onDelete: Cascade)
+  room            Room                    @relation(fields: [room_id], references: [id], onDelete: Cascade)
+  item            Item                    @relation(fields: [item_id], references: [id], onDelete: Cascade)
+  audit           Audit                   @relation(fields: [audit_id], references: [id], onDelete: Cascade)
+  assetPurchase   AssetPurchase?          @relation(fields: [asset_purchase_id], references: [id], onDelete: SetNull)
 
-  created_at        DateTime             @default(now())
-  updated_at        DateTime             @updatedAt
+  created_at          DateTime             @default(now())
+  updated_at          DateTime             @updatedAt
 
-  @@unique([room_id, item_id, audit_id])
+  // New unique constraint: each serial number appears once per audit
+  @@unique([item_serial_no, audit_id], name: "serial_audit_unique")
+  
   @@index([room_id])
   @@index([item_id])
   @@index([audit_id])
+  @@index([item_serial_no])
+  @@index([asset_purchase_id])
 }
 
 /*
@@ -142,10 +163,19 @@ model AssetPurchase {
   quantity        Int
   unit_price      Decimal     @db.Decimal(10, 2)
   total_cost      Decimal     @db.Decimal(10, 2)
+  serial_number   String?
   
   // Purchase info
   purchase_date   DateTime    @default(now())
   notes           String?
+  
+  // Images
+  item_image_url     String?
+  billing_image_url  String?
+  
+  // Audit fields
+  assigned_by_name   String?
+  status             String?     @default("Active")
   
   // Who added this
   added_by        String?
@@ -154,6 +184,7 @@ model AssetPurchase {
   // Relations
   room            Room        @relation(fields: [room_id], references: [id], onDelete: Cascade)
   item            Item        @relation(fields: [item_id], references: [id], onDelete: Cascade)
+  itemDetails     ItemDetails[]  // Link to audit records for this purchase
   
   created_at      DateTime    @default(now())
   updated_at      DateTime    @updatedAt
@@ -162,6 +193,7 @@ model AssetPurchase {
   @@index([item_id])
   @@index([purchase_date])
   @@index([added_by])
+  @@index([serial_number])
 }
 
 /*

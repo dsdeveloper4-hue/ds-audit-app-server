@@ -7,11 +7,20 @@ export interface JwtConfig {
   refresh_token_expires_in: string;
 }
 
+export interface cloudinary {
+  cloudname: string;         
+  cloudinary_api_key: string;
+  cloudinary_api_secret: string;
+  cloudinary_url: string;
+}
+
+
 export interface Config {
   env: string;
   port: string;
   salt_rounds: string;
   jwt: JwtConfig;
+  cloudinary: cloudinary
 }
 
 

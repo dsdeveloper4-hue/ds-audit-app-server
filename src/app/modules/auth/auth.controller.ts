@@ -5,13 +5,10 @@ import sendResponse from "@app/shared/sendResponse";
 import httpStatus from "http-status";
 import config from "@app/config";
 import { authService } from "@app/modules/auth/auth.service";
-import { LoginResult } from "@app/types";
-
-
 
 const login = catchAsync(async (req: Request, res: Response) => {
-  const result: LoginResult = await authService.login(req);
-  const { refreshToken, accessToken, ...other } = result;
+  const result = await authService.login(req);
+  const { refreshToken, accessToken } = result;
 
   // Set cookies using config values
   res.cookie("accessToken", accessToken, {
@@ -34,7 +31,7 @@ const login = catchAsync(async (req: Request, res: Response) => {
     statusCode: httpStatus.OK,
     success: true,
     message: "User logged in successfully!",
-    data: { ...other, accessToken },
+    data: { accessToken },
   });
 });
 

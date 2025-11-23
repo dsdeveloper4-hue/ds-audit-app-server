@@ -16,14 +16,15 @@ const createItem = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
-const getAllItems = catchAsync(async (_req: Request, res: Response) => {
-  const result = await itemService.getAllItems();
+const getAllItems = catchAsync(async (req: Request, res: Response) => {
+  const result = await itemService.getAllItems(req.query);
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
     message: "Items retrieved successfully!",
-    data: result,
+    data: result.data,
+    pagination: result.pagination,
   });
 });
 

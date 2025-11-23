@@ -14,6 +14,10 @@ const requiredEnv = [
   "ACCESS_TOKEN_EXPIRES_IN",
   "REFRESH_TOKEN_SECRET",
   "REFRESH_TOKEN_EXPIRES_IN",
+  "CLOUDNAME",
+  "CLOUDINARY_API_KEY",
+  "CLOUDINARY_API_SECRET",
+  "CLOUDINARY_URL"
 ] as const;
 
 requiredEnv.forEach((key) => {
@@ -31,6 +35,12 @@ const config: Config = {
     access_token_expires_in: process.env.ACCESS_TOKEN_EXPIRES_IN!,
     refresh_token_secret: process.env.REFRESH_TOKEN_SECRET!,
     refresh_token_expires_in: process.env.REFRESH_TOKEN_EXPIRES_IN!,
+  },
+  cloudinary: {
+    cloudname: process.env.CLOUDNAME!,
+    cloudinary_api_key: process.env.CLOUDINARY_API_KEY!,
+    cloudinary_api_secret: process.env.CLOUDINARY_API_SECRET!,
+    cloudinary_url: process.env.CLOUDINARY_URL!,
   },
 };
 

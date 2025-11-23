@@ -4,6 +4,10 @@ import AppError from "@app/errors/AppError";
 import prisma from "@app/lib/prisma";
 import httpStatus from "http-status";
 import { Audit, User } from "@prisma/client";
+import {
+  calculateTotalAssetValue,
+  calculateAdjustedAssetValue,
+} from "@app/shared/calculateTotalValue";
 
 // ---------------- CREATE AUDIT ----------------
 // Creates an audit for a specific month/year
@@ -107,41 +111,84 @@ const createAudit = async (req: Request): Promise<any> => {
       },
     });
 
-    // Copy item details from previous audit or create with 0 values
+    // Copy item details from previous audit - SERIAL NUMBER BASED
     if (latestAudit?.itemDetails && latestAudit.itemDetails.length > 0) {
-      // Previous audit exists - copy all item details with their quantities AND prices
-      console.log("📋 [createAudit] Copying items from previous audit...");
-      await tx.itemDetails.createMany({
-        data: latestAudit.itemDetails.map((detail) => {
-          const unitPrice = detail.unit_price ? Number(detail.unit_price) : 0;
-          const totalPrice = detail.total_price
-            ? Number(detail.total_price)
-            : 0;
-
-          console.log(
-            `  ✓ Copying item: room=${detail.room_id}, item=${
-              detail.item_id
-            }, qty=${
-              detail.active_quantity +
-              detail.broken_quantity +
-              detail.inactive_quantity
-            }, unit_price=${unitPrice}, total_price=${totalPrice}`
-          );
-
-          return {
-            audit_id: createdAudit.id,
-            room_id: detail.room_id,
-            item_id: detail.item_id,
-            active_quantity: detail.active_quantity,
-            broken_quantity: detail.broken_quantity,
-            inactive_quantity: detail.inactive_quantity,
-            unit_price: unitPrice,
-            total_price: totalPrice,
-          };
-        }),
-      });
       console.log(
-        `✅ [createAudit] Successfully copied ${latestAudit.itemDetails.length} items with prices`
+        "📋 [createAudit] Copying item details from previous audit (serial number-based)..."
+      );
+
+      // Get all current asset purchases to map serial numbers to their latest prices
+      const assetPurchases = await tx.assetPurchase.findMany({
+        where: {
+          serial_number: { not: null }, // Only serial-tracked purchases
+        },
+        include: {
+          room: true,
+          item: true,
+        },
+        orderBy: [{ created_at: "desc" }, { purchase_date: "desc" }],
+      });
+
+      // Map serial numbers to their latest purchase data
+      const serialMap = new Map<string, any>();
+      assetPurchases.forEach((purchase) => {
+        if (purchase.serial_number && !serialMap.has(purchase.serial_number)) {
+          serialMap.set(purchase.serial_number, {
+            room_id: purchase.room_id,
+            item_id: purchase.item_id,
+            unit_price: Number(purchase.unit_price),
+            serial_number: purchase.serial_number,
+            asset_purchase_id: purchase.id,
+          });
+        }
+      });
+
+      // Copy each ItemDetails record from previous audit
+      // If it has a serial number, use the latest price for that serial
+      // If it's aggregated (no serial), copy as-is
+      const itemDetailsToCreate = latestAudit.itemDetails.map((detail: any) => {
+        let unitPrice = detail.unit_price ? Number(detail.unit_price) : 0;
+        let totalPrice = detail.total_price ? Number(detail.total_price) : 0;
+        let assetPurchaseId = detail.asset_purchase_id;
+
+        // If this detail has a serial number, get its latest price
+        if (detail.item_serial_no) {
+          const serialData = serialMap.get(detail.item_serial_no);
+          if (serialData) {
+            unitPrice = serialData.unit_price;
+            totalPrice = unitPrice; // For serial items, total = unit price
+            assetPurchaseId = serialData.asset_purchase_id;
+            console.log(
+              `  ✓ Serial ${detail.item_serial_no}: using latest price ₹${unitPrice}`
+            );
+          } else {
+            console.log(
+              `  ⚠️ Serial ${detail.item_serial_no}: no purchase found, keeping previous price ₹${unitPrice}`
+            );
+          }
+        }
+
+        return {
+          audit_id: createdAudit.id,
+          room_id: detail.room_id,
+          item_id: detail.item_id,
+          item_serial_no: detail.item_serial_no,
+          asset_purchase_id: assetPurchaseId,
+          active_quantity: detail.active_quantity,
+          broken_quantity: detail.broken_quantity,
+          inactive_quantity: detail.inactive_quantity,
+          lost_quantity: detail.lost_quantity || 0,
+          unit_price: unitPrice,
+          total_price: totalPrice,
+        };
+      });
+
+      await tx.itemDetails.createMany({
+        data: itemDetailsToCreate,
+      });
+
+      console.log(
+        `✅ [createAudit] Successfully created ${itemDetailsToCreate.length} items (serial number-based)`
       );
     } else {
       // No previous audit - create item details for all room-item combinations with 0 values
@@ -296,6 +343,16 @@ const getAuditById = async (id: string): Promise<any> => {
     throw new AppError(httpStatus.NOT_FOUND, "Audit not found");
   }
 
+  // Filter out items with zero total quantity (active + broken + inactive + lost = 0)
+  const activeItemDetails = audit.itemDetails.filter((detail: any) => {
+    const totalQty =
+      detail.active_quantity +
+      detail.broken_quantity +
+      detail.inactive_quantity +
+      (detail.lost_quantity || 0);
+    return totalQty > 0;
+  });
+
   // Fetch history for this audit from RecentActivityHistory
   const history = await prisma.recentActivityHistory.findMany({
     where: {
@@ -321,21 +378,32 @@ const getAuditById = async (id: string): Promise<any> => {
     },
   });
 
-  // Group item details by room for better organization
-  const detailsByRoom = audit.itemDetails.reduce((acc: any, detail: any) => {
+  // Group item details by room for better organization (only active items)
+  const detailsByRoom = activeItemDetails.reduce((acc: any, detail: any) => {
     const roomName = detail.room.name;
     if (!acc[roomName]) {
       acc[roomName] = {
         room: detail.room,
         items: [],
+        totalItems: 0,
+        totalValue: 0,
       };
     }
     acc[roomName].items.push(detail);
+
+    // Calculate total items (count of items with quantity > 0)
+    acc[roomName].totalItems += 1;
+
+    // Calculate total value
+    const totalPrice = Number(detail.total_price) || 0;
+    acc[roomName].totalValue += totalPrice;
+
     return acc;
   }, {});
 
   return {
     ...audit,
+    itemDetails: activeItemDetails, // Return only active items
     history,
     detailsByRoom: Object.values(detailsByRoom),
   };
@@ -368,6 +436,16 @@ const getLatestAudit = async (): Promise<any> => {
     return { message: "No audits found" };
   }
 
+  // Filter out items with zero total quantity
+  const activeItemDetails = audit.itemDetails.filter((detail: any) => {
+    const totalQty =
+      detail.active_quantity +
+      detail.broken_quantity +
+      detail.inactive_quantity +
+      (detail.lost_quantity || 0);
+    return totalQty > 0;
+  });
+
   const history = await prisma.recentActivityHistory.findMany({
     where: {
       OR: [
@@ -392,20 +470,31 @@ const getLatestAudit = async (): Promise<any> => {
     },
   });
 
-  const detailsByRoom = audit.itemDetails.reduce((acc: any, detail: any) => {
+  const detailsByRoom = activeItemDetails.reduce((acc: any, detail: any) => {
     const roomName = detail.room.name;
     if (!acc[roomName]) {
       acc[roomName] = {
         room: detail.room,
         items: [],
+        totalItems: 0,
+        totalValue: 0,
       };
     }
     acc[roomName].items.push(detail);
+
+    // Calculate total items (count of items with quantity > 0)
+    acc[roomName].totalItems += 1;
+
+    // Calculate total value
+    const totalPrice = Number(detail.total_price) || 0;
+    acc[roomName].totalValue += totalPrice;
+
     return acc;
   }, {} as Record<string, any>);
 
   return {
     ...audit,
+    itemDetails: activeItemDetails, // Return only active items
     history,
     detailsByRoom: Object.values(detailsByRoom),
   };
@@ -574,14 +663,13 @@ const addItemDetailToAudit = async (
     throw new AppError(httpStatus.NOT_FOUND, "Item not found");
   }
 
-  // Check if this combination already exists in the audit
-  const existing = await prisma.itemDetails.findUnique({
+  // Check if an aggregated record already exists for this combination
+  const existing = await prisma.itemDetails.findFirst({
     where: {
-      room_id_item_id_audit_id: {
-        room_id,
-        item_id,
-        audit_id,
-      },
+      room_id,
+      item_id,
+      audit_id,
+      item_serial_no: null, // Only check for aggregated records
     },
   });
 
@@ -592,47 +680,72 @@ const addItemDetailToAudit = async (
     );
   }
 
-  // Get the most recent purchase price for this item
-  // Order by both created_at and purchase_date to ensure we get the absolute latest
-  const latestPurchase = await prisma.assetPurchase.findFirst({
-    where: { item_id },
-    orderBy: [{ created_at: "desc" }, { purchase_date: "desc" }],
-    select: { unit_price: true, purchase_date: true, created_at: true },
+  // SERIAL NUMBER-BASED PRICING:
+  // Get ALL asset purchases for this item in this room to calculate accurate total price
+  const assetPurchases = await prisma.assetPurchase.findMany({
+    where: {
+      item_id,
+      room_id,
+    },
+    orderBy: [{ purchase_date: "desc" }, { created_at: "desc" }],
+    select: {
+      id: true,
+      unit_price: true,
+      quantity: true,
+      total_cost: true,
+      serial_number: true,
+      purchase_date: true,
+    },
   });
 
   console.log("🔍 [addItemDetailToAudit] Item:", item.name);
-  console.log("🔍 [addItemDetailToAudit] Latest purchase:", latestPurchase);
+  console.log("🔍 [addItemDetailToAudit] Room:", room.name);
   console.log(
-    "🔍 [addItemDetailToAudit] Latest purchase unit_price type:",
-    typeof latestPurchase?.unit_price
-  );
-  console.log("🔍 [addItemDetailToAudit] Item unit_price:", item.unit_price);
-  console.log(
-    "🔍 [addItemDetailToAudit] Item unit_price type:",
-    typeof item.unit_price
+    `🔍 [addItemDetailToAudit] Found ${assetPurchases.length} asset purchases`
   );
 
-  // Use latest purchase price, fallback to item's unit_price, then 0
-  // Convert Decimal to number properly
-  let unitPrice = 0;
-  if (latestPurchase?.unit_price) {
-    unitPrice = Number(latestPurchase.unit_price);
-    console.log("✅ Using latest purchase price:", unitPrice);
-  } else if (item.unit_price) {
-    unitPrice = Number(item.unit_price);
-    console.log("⚠️ No purchase found, using item master price:", unitPrice);
-  } else {
+  // Calculate total price by summing all purchase costs (preserves individual prices)
+  let totalPrice = 0;
+  let totalPurchasedQty = 0;
+
+  assetPurchases.forEach((purchase) => {
+    const cost = Number(purchase.total_cost) || 0;
+    totalPrice += cost;
+    totalPurchasedQty += purchase.quantity;
     console.log(
-      "❌ WARNING: No price found! Item has no purchase history and no unit_price set!"
+      `  - Purchase: qty=${purchase.quantity}, unit_price=${
+        purchase.unit_price
+      }, total_cost=${cost}, serial=${purchase.serial_number || "N/A"}`
     );
-    console.log(
-      "❌ Please add an asset purchase or set unit_price in item master"
-    );
+  });
+
+  console.log(
+    `📊 Total from purchases: ${totalPurchasedQty} items = ₹${totalPrice}`
+  );
+
+  // Calculate average unit price for reference (but use total_price for accuracy)
+  const unitPrice = totalPurchasedQty > 0 ? totalPrice / totalPurchasedQty : 0;
+
+  // If no purchases found, fallback to item master price
+  if (assetPurchases.length === 0) {
+    console.log("⚠️ No asset purchases found for this item in this room");
+    if (item.unit_price) {
+      const fallbackPrice = Number(item.unit_price);
+      console.log(`⚠️ Using item master price: ₹${fallbackPrice}`);
+      const totalQuantity =
+        (active_quantity ?? 0) +
+        (broken_quantity ?? 0) +
+        (inactive_quantity ?? 0);
+      totalPrice = fallbackPrice * totalQuantity;
+    } else {
+      console.log(
+        "❌ WARNING: No price found! Please add asset purchases or set unit_price in item master"
+      );
+    }
   }
 
   const totalQuantity =
     (active_quantity ?? 0) + (broken_quantity ?? 0) + (inactive_quantity ?? 0);
-  const totalPrice = unitPrice * totalQuantity;
 
   console.log("🔍 [addItemDetailToAudit] Final unit_price:", unitPrice);
   console.log("🔍 [addItemDetailToAudit] Total quantity:", totalQuantity);
@@ -771,6 +884,37 @@ const updateItemDetail = async (
   // Calculate average unit_price for reference
   const newUnitPrice =
     newTotalQty > 0 ? newTotalPrice / newTotalQty : detail.unit_price || 0;
+
+  // Check if all quantities are zero after update - if so, delete the record
+  if (newTotalQty === 0) {
+    await prisma.itemDetails.delete({
+      where: { id: detail_id },
+    });
+
+    // Log the deletion
+    await prisma.recentActivityHistory.create({
+      data: {
+        user_id: user.id,
+        entity_type: "ItemDetails",
+        entity_id: detail.id,
+        entity_name: `${detail.item.name} - ${detail.room.name}`,
+        action_type: "DELETE",
+        before: oldValues,
+        description: `Removed ${detail.item.name} from ${detail.room.name} (all quantities = 0)`,
+        metadata: {
+          audit_id: detail.audit_id,
+          room_id: detail.room_id,
+          item_id: detail.item_id,
+          auto_deleted: true,
+        },
+      },
+    });
+
+    return {
+      message: "Item detail deleted (all quantities = 0)",
+      deleted: true,
+    };
+  }
 
   const updatedDetail = await prisma.itemDetails.update({
     where: { id: detail_id },
@@ -959,6 +1103,7 @@ const getItemSummaryByAuditId = async (id: string): Promise<any> => {
           id: true,
           name: true,
           category: true,
+          sub_category: true,
           unit: true,
           unit_price: true,
         },
@@ -980,10 +1125,12 @@ const getItemSummaryByAuditId = async (id: string): Promise<any> => {
         item_id: itemId, // Use first item's ID
         item_name: itemName,
         category: detail.item.category,
+        sub_category: detail.item.sub_category,
         unit: detail.item.unit,
         active: 0,
         inactive: 0,
         damage: 0,
+        lost: 0,
         total: 0,
         total_price: 0,
       });
@@ -993,10 +1140,12 @@ const getItemSummaryByAuditId = async (id: string): Promise<any> => {
     summary.active += detail.active_quantity;
     summary.inactive += detail.inactive_quantity;
     summary.damage += detail.broken_quantity;
+    summary.lost += detail.lost_quantity || 0;
     const qty =
       detail.active_quantity +
       detail.inactive_quantity +
-      detail.broken_quantity;
+      detail.broken_quantity +
+      (detail.lost_quantity || 0);
     summary.total += qty;
     // Sum the stored total_price from each entry (handles different prices per purchase)
     summary.total_price += entryTotalPrice;
@@ -1018,6 +1167,161 @@ const getItemSummaryByAuditId = async (id: string): Promise<any> => {
   };
 
   return result;
+};
+
+// ---------------- CLEANUP ZERO QUANTITY ITEMS ----------------
+// Remove ItemDetails records where all quantities are 0
+const cleanupZeroQuantityItems = async (audit_id: string): Promise<number> => {
+  const result = await prisma.itemDetails.deleteMany({
+    where: {
+      audit_id,
+      active_quantity: 0,
+      broken_quantity: 0,
+      inactive_quantity: 0,
+      lost_quantity: 0,
+    },
+  });
+
+  console.log(
+    `🧹 Cleaned up ${result.count} zero-quantity items from audit ${audit_id}`
+  );
+  return result.count;
+};
+
+// ---------------- SYNC AUDIT WITH ASSET PURCHASES ----------------
+// Recalculate audit ItemDetails based on current AssetPurchase records
+const syncAuditWithAssetPurchases = async (
+  audit_id: string,
+  req: Request
+): Promise<any> => {
+  const user = req.user as User;
+
+  const audit = await prisma.audit.findUnique({
+    where: { id: audit_id },
+  });
+
+  if (!audit) {
+    throw new AppError(httpStatus.NOT_FOUND, "Audit not found");
+  }
+
+  // Get all asset purchases
+  const assetPurchases = await prisma.assetPurchase.findMany({
+    include: {
+      room: true,
+      item: true,
+    },
+  });
+
+  // Group by room_id + item_id + status
+  // SERIAL NUMBER-BASED PRICING: Track each purchase separately to preserve individual prices
+  const purchaseMap = new Map<string, any>();
+
+  assetPurchases.forEach((purchase) => {
+    const key = `${purchase.room_id}|${purchase.item_id}`;
+
+    if (!purchaseMap.has(key)) {
+      purchaseMap.set(key, {
+        room_id: purchase.room_id,
+        item_id: purchase.item_id,
+        active: 0,
+        inactive: 0,
+        broken: 0,
+        lost: 0,
+        purchases: [],
+        totalCost: 0, // Sum of all purchase costs (preserves individual prices)
+      });
+    }
+
+    const entry = purchaseMap.get(key);
+    entry.purchases.push(purchase);
+
+    // Add purchase cost to total (this preserves serial number-based pricing)
+    entry.totalCost += Number(purchase.total_cost) || 0;
+
+    // Add to appropriate status bucket
+    const status = purchase.status || "Active";
+    switch (status) {
+      case "Active":
+        entry.active += purchase.quantity;
+        break;
+      case "Inactive":
+        entry.inactive += purchase.quantity;
+        break;
+      case "Damage":
+        entry.broken += purchase.quantity;
+        break;
+      case "Lost":
+        entry.lost += purchase.quantity;
+        break;
+      default:
+        entry.active += purchase.quantity;
+    }
+  });
+
+  // Update or create ItemDetails for this audit
+  await prisma.$transaction(async (tx) => {
+    // First, delete all existing ItemDetails for this audit
+    await tx.itemDetails.deleteMany({
+      where: { audit_id },
+    });
+
+    // Create new ItemDetails based on asset purchases
+    const itemDetailsToCreate = [];
+
+    for (const [key, data] of purchaseMap.entries()) {
+      const totalQty = data.active + data.inactive + data.broken + data.lost;
+
+      // Only create if there's actual quantity
+      if (totalQty > 0) {
+        // SERIAL NUMBER-BASED PRICING:
+        // Use the sum of all purchase costs (preserves individual prices)
+        // Calculate average unit price for reference only
+        const totalCost = data.totalCost;
+        const avgUnitPrice = totalQty > 0 ? totalCost / totalQty : 0;
+
+        console.log(
+          `📊 [syncAudit] ${data.item_id}: ${totalQty} items, total_cost=₹${totalCost}, avg_unit=₹${avgUnitPrice}`
+        );
+
+        itemDetailsToCreate.push({
+          audit_id,
+          room_id: data.room_id,
+          item_id: data.item_id,
+          active_quantity: data.active,
+          broken_quantity: data.broken,
+          inactive_quantity: data.inactive,
+          lost_quantity: data.lost,
+          unit_price: avgUnitPrice,
+          total_price: totalCost,
+        });
+      }
+    }
+
+    if (itemDetailsToCreate.length > 0) {
+      await tx.itemDetails.createMany({
+        data: itemDetailsToCreate,
+      });
+    }
+
+    // Log the sync action
+    await tx.recentActivityHistory.create({
+      data: {
+        user_id: user.id,
+        entity_type: "Audit",
+        entity_id: audit_id,
+        entity_name: `Audit ${audit.month}/${audit.year}`,
+        action_type: "UPDATE",
+        description: `Synced audit with asset purchases - ${itemDetailsToCreate.length} items updated`,
+        metadata: {
+          synced_items: itemDetailsToCreate.length,
+          source: "sync_with_asset_purchases",
+        },
+      },
+    });
+  });
+
+  // Return updated audit
+  return getAuditById(audit_id);
 };
 
 // ---------------- UPDATE ADJUSTMENT PERCENTAGE ----------------
@@ -1090,41 +1394,149 @@ const updateAdjustment = async (
     },
   });
 
-  // Calculate total asset value
-  let totalAssetValue = 0;
-  updatedAudit.itemDetails.forEach((detail: any) => {
-    const activeQty = detail.active_quantity || 0;
-    const brokenQty = detail.broken_quantity || 0;
-    const inactiveQty = detail.inactive_quantity || 0;
-    const totalQty = activeQty + brokenQty + inactiveQty;
-
-    const itemTotalPrice = detail.total_price || 0;
-
-    if (totalQty > 0) {
-      const pricePerUnit = Number(itemTotalPrice) / totalQty;
-
-      // Active and Inactive: full price
-      totalAssetValue += activeQty * pricePerUnit;
-      totalAssetValue += inactiveQty * pricePerUnit;
-
-      // Broken: 95% of price (5% depreciation)
-      totalAssetValue += brokenQty * pricePerUnit * 0.95;
-    }
+  // Filter only items with quantity > 0 for calculations
+  const activeItems = updatedAudit.itemDetails.filter((detail: any) => {
+    const totalQty =
+      detail.active_quantity +
+      detail.broken_quantity +
+      detail.inactive_quantity +
+      (detail.lost_quantity || 0);
+    return totalQty > 0;
   });
 
-  // Calculate adjusted value
-  const reductionAmount =
-    totalAssetValue * (Number(reduction_percentage) / 100);
-  const adjustedAssetValue = totalAssetValue - reductionAmount;
+  // Convert Prisma Decimal types to numbers for shared calculation function
+  const itemDetailsForCalculation = activeItems.map((detail: any) => ({
+    active_quantity: detail.active_quantity,
+    broken_quantity: detail.broken_quantity,
+    inactive_quantity: detail.inactive_quantity,
+    lost_quantity: detail.lost_quantity || 0,
+    total_price: Number(detail.total_price) || 0,
+    item: {
+      name: detail.item?.name || "Unknown",
+    },
+  }));
+
+  // Use shared calculation function to ensure consistency with Dashboard
+  const { totalAssetValue, adjustedAssetValue, reductionAmount } =
+    calculateAdjustedAssetValue(
+      itemDetailsForCalculation,
+      Number(reduction_percentage)
+    );
 
   // Return audit with calculated values
   return {
     ...updatedAudit,
-    total_asset_value: Math.round(totalAssetValue * 100) / 100,
-    adjusted_asset_value: Math.round(adjustedAssetValue * 100) / 100,
-    reduction_amount: Math.round(reductionAmount * 100) / 100,
+    itemDetails: activeItems, // Return only active items
+    total_asset_value: totalAssetValue,
+    adjusted_asset_value: adjustedAssetValue,
+    reduction_amount: reductionAmount,
   };
 };
+
+// ---------------- GET DASHBOARD TOTALS ----------------
+// Returns total values using the same calculation as Adjusted Report
+const getDashboardTotals = async (audit_id?: string): Promise<any> => {
+  let audit;
+
+  if (audit_id) {
+    audit = await prisma.audit.findUnique({
+      where: { id: audit_id },
+      include: {
+        itemDetails: {
+          include: {
+            item: {
+              select: {
+                name: true,
+              },
+            },
+          },
+        },
+      },
+    });
+  } else {
+    // Get latest audit
+    audit = await prisma.audit.findFirst({
+      include: {
+        itemDetails: {
+          include: {
+            item: {
+              select: {
+                name: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: [{ year: "desc" }, { month: "desc" }, { created_at: "desc" }],
+    });
+  }
+
+  if (!audit) {
+    throw new AppError(httpStatus.NOT_FOUND, "Audit not found");
+  }
+
+  // Filter only items with quantity > 0
+  const activeItems = audit.itemDetails.filter((detail: any) => {
+    const totalQty =
+      detail.active_quantity +
+      detail.broken_quantity +
+      detail.inactive_quantity +
+      (detail.lost_quantity || 0);
+    return totalQty > 0;
+  });
+
+  // Convert Prisma Decimal types to numbers for shared calculation function
+  const itemDetailsForCalculation = activeItems.map((detail: any) => ({
+    active_quantity: detail.active_quantity,
+    broken_quantity: detail.broken_quantity,
+    inactive_quantity: detail.inactive_quantity,
+    lost_quantity: detail.lost_quantity || 0,
+    total_price: Number(detail.total_price) || 0,
+    item: {
+      name: detail.item?.name || "Unknown",
+    },
+  }));
+
+  // Use shared calculation function for consistency
+  const totalValue = calculateTotalAssetValue(itemDetailsForCalculation);
+
+  // Calculate status-wise totals
+  let totalActive = 0;
+  let totalBroken = 0;
+  let totalInactive = 0;
+  let totalLost = 0;
+
+  activeItems.forEach((detail: any) => {
+    totalActive += detail.active_quantity || 0;
+    totalBroken += detail.broken_quantity || 0;
+    totalInactive += detail.inactive_quantity || 0;
+    totalLost += detail.lost_quantity || 0;
+  });
+
+  return {
+    audit: {
+      id: audit.id,
+      month: audit.month,
+      year: audit.year,
+      status: audit.status,
+    },
+    totals: {
+      totalValue,
+      totalActive,
+      totalBroken,
+      totalInactive,
+      totalLost,
+      totalItems: totalActive + totalBroken + totalInactive + totalLost,
+    },
+  };
+};
+
+// Import price recalculation functions
+import {
+  recalculateAuditPrices,
+  recalculateLatestAuditPrices,
+  recalculateItemPrices,
+} from "./recalculatePrices.service";
 
 export const auditService = {
   createAudit,
@@ -1138,4 +1550,10 @@ export const auditService = {
   deleteAudit,
   getItemSummaryByAuditId,
   updateAdjustment,
+  cleanupZeroQuantityItems,
+  syncAuditWithAssetPurchases,
+  getDashboardTotals,
+  recalculateAuditPrices,
+  recalculateLatestAuditPrices,
+  recalculateItemPrices,
 };

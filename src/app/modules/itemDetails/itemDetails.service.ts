@@ -30,14 +30,13 @@ const createItemDetails = async (req: Request): Promise<ItemDetails> => {
     );
   }
 
-  // Check if the combination already exists
-  const existingItemDetails = await prisma.itemDetails.findUnique({
+  // Check if an aggregated record (no serial number) already exists for this combination
+  const existingItemDetails = await prisma.itemDetails.findFirst({
     where: {
-      room_id_item_id_audit_id: {
-        room_id,
-        item_id,
-        audit_id,
-      },
+      room_id,
+      item_id,
+      audit_id,
+      item_serial_no: null, // Only check for aggregated records
     },
   });
 
@@ -277,6 +276,38 @@ const updateItemDetails = async (
   // Calculate average unit_price for reference
   const newUnitPrice =
     newTotalQty > 0 ? newTotalPrice / newTotalQty : itemDetails.unit_price || 0;
+
+  // Check if all quantities are zero after update - if so, delete the record
+  if (newTotalQty === 0) {
+    await prisma.itemDetails.delete({
+      where: { id },
+    });
+
+    // Log the deletion
+    await prisma.recentActivityHistory.create({
+      data: {
+        user_id: user.id,
+        entity_type: "ItemDetails",
+        entity_id: itemDetails.id,
+        entity_name: `${itemDetails.item.name} - ${itemDetails.room.name}`,
+        action_type: "DELETE",
+        before,
+        description: `Removed ${itemDetails.item.name} from ${itemDetails.room.name} (all quantities = 0)`,
+        metadata: {
+          audit_id: itemDetails.audit_id,
+          room_id: itemDetails.room_id,
+          item_id: itemDetails.item_id,
+          auto_deleted: true,
+          reason: "zero_quantity_update",
+        },
+      },
+    });
+
+    return {
+      message: "Item detail deleted (all quantities = 0)",
+      deleted: true,
+    } as any;
+  }
 
   const updatedItemDetails = await prisma.itemDetails.update({
     where: { id },

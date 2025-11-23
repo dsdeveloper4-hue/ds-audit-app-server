@@ -135,6 +135,73 @@ const updateAdjustment = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
+const cleanupZeroQuantityItems = catchAsync(
+  async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const result = await auditService.cleanupZeroQuantityItems(id);
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: `Cleaned up ${result} zero-quantity items successfully!`,
+      data: { deletedCount: result },
+    });
+  }
+);
+
+const syncAuditWithAssetPurchases = catchAsync(
+  async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const result = await auditService.syncAuditWithAssetPurchases(id, req);
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Audit synced with asset purchases successfully!",
+      data: result,
+    });
+  }
+);
+
+const recalculateAuditPrices = catchAsync(
+  async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const result = await auditService.recalculateAuditPrices(id, req);
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Audit prices recalculated successfully!",
+      data: result,
+    });
+  }
+);
+
+const recalculateLatestAuditPrices = catchAsync(
+  async (req: Request, res: Response) => {
+    const result = await auditService.recalculateLatestAuditPrices(req);
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Latest audit prices recalculated successfully!",
+      data: result,
+    });
+  }
+);
+
+const getDashboardTotals = catchAsync(async (req: Request, res: Response) => {
+  const { audit_id } = req.query;
+  const result = await auditService.getDashboardTotals(audit_id as string);
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: "Dashboard totals retrieved successfully!",
+    data: result,
+  });
+});
+
 export const auditController = {
   createAudit,
   getAllAudits,
@@ -147,4 +214,9 @@ export const auditController = {
   deleteAudit,
   getItemSummaryByAuditId,
   updateAdjustment,
+  cleanupZeroQuantityItems,
+  syncAuditWithAssetPurchases,
+  recalculateAuditPrices,
+  recalculateLatestAuditPrices,
+  getDashboardTotals,
 };
