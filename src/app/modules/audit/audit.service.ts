@@ -225,7 +225,7 @@ const createAudit = async (req: Request): Promise<any> => {
           select: {
             id: true,
             name: true,
-            mobile: true,
+            email: true,
           },
         },
         itemDetails: {
@@ -298,7 +298,7 @@ const getAllAudits = async (): Promise<Audit[]> => {
         select: {
           id: true,
           name: true,
-          mobile: true,
+          email: true,
         },
       },
       itemDetails: {
@@ -326,7 +326,7 @@ const getAuditById = async (id: string): Promise<any> => {
         select: {
           id: true,
           name: true,
-          mobile: true,
+          email: true,
         },
       },
       itemDetails: {
@@ -369,7 +369,7 @@ const getAuditById = async (id: string): Promise<any> => {
         select: {
           id: true,
           name: true,
-          mobile: true,
+          email: true,
         },
       },
     },
@@ -417,7 +417,7 @@ const getLatestAudit = async (): Promise<any> => {
         select: {
           id: true,
           name: true,
-          mobile: true,
+          email: true,
         },
       },
       itemDetails: {
@@ -461,7 +461,7 @@ const getLatestAudit = async (): Promise<any> => {
         select: {
           id: true,
           name: true,
-          mobile: true,
+          email: true,
         },
       },
     },
@@ -565,7 +565,7 @@ const updateAudit = async (id: string, req: Request): Promise<Audit> => {
         select: {
           id: true,
           name: true,
-          mobile: true,
+          email: true,
         },
       },
       _count: {
@@ -1388,7 +1388,7 @@ const updateAdjustment = async (
         select: {
           id: true,
           name: true,
-          mobile: true,
+          email: true,
         },
       },
     },
@@ -1531,6 +1531,159 @@ const getDashboardTotals = async (audit_id?: string): Promise<any> => {
   };
 };
 
+// ---------------- GET STATUS HISTORY (MONTH-WISE) ----------------
+// Returns month-wise breakdown for a specific status across all audits
+const getStatusHistory = async (status: string): Promise<any> => {
+  // Validate status
+  const validStatuses = ["Active", "Inactive", "Damage", "Lost"];
+  if (!validStatuses.includes(status)) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      `Invalid status. Must be one of: ${validStatuses.join(", ")}`
+    );
+  }
+
+  // Get all audits with their item details
+  const audits = await prisma.audit.findMany({
+    include: {
+      itemDetails: {
+        include: {
+          room: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          item: {
+            select: {
+              id: true,
+              name: true,
+              category: true,
+              sub_category: true,
+            },
+          },
+        },
+      },
+    },
+    orderBy: [{ year: "desc" }, { month: "desc" }],
+  });
+
+  // Map status to quantity field
+  const statusFieldMap: Record<string, string> = {
+    Active: "active_quantity",
+    Inactive: "inactive_quantity",
+    Damage: "broken_quantity",
+    Lost: "lost_quantity",
+  };
+
+  const quantityField = statusFieldMap[status];
+
+  // Process each audit
+  const monthlyData = audits.map((audit) => {
+    // Get month name
+    const monthNames = [
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December",
+    ];
+    const monthName = monthNames[audit.month - 1] || "Unknown";
+
+    // Group by item name, then by room
+    const itemMap = new Map<string, any>();
+
+    audit.itemDetails.forEach((detail: any) => {
+      const quantity = detail[quantityField] || 0;
+
+      // Skip if no quantity for this status
+      if (quantity === 0) return;
+
+      const itemName = detail.item?.name || "Unknown";
+      const subCategory = detail.item?.sub_category || null;
+      const roomName = detail.room?.name || "Unknown Room";
+      const roomId = detail.room?.id || "";
+
+      // Calculate value for this specific quantity
+      const totalQty =
+        (detail.active_quantity || 0) +
+        (detail.broken_quantity || 0) +
+        (detail.inactive_quantity || 0) +
+        (detail.lost_quantity || 0);
+      const totalPrice = Number(detail.total_price) || 0;
+      const pricePerUnit = totalQty > 0 ? totalPrice / totalQty : 0;
+      const value = pricePerUnit * quantity;
+
+      // Create unique key for item-room combination
+      const itemRoomKey = `${itemName}-${roomId}`;
+
+      // Initialize item if not exists
+      if (!itemMap.has(itemRoomKey)) {
+        itemMap.set(itemRoomKey, {
+          itemName,
+          subCategory,
+          rooms: [],
+          totalQuantity: 0,
+          totalValue: 0,
+        });
+      }
+
+      const item = itemMap.get(itemRoomKey);
+
+      // Add room data (each item-room combination is separate)
+      item.rooms.push({
+        roomId,
+        roomName,
+        quantity,
+        value,
+      });
+
+      item.totalQuantity += quantity;
+      item.totalValue += value;
+    });
+
+    // Convert map to array and sort by item name
+    const items = Array.from(itemMap.values()).sort((a, b) =>
+      a.itemName.localeCompare(b.itemName)
+    );
+
+    // Calculate totals for this month
+    const totalQuantity = items.reduce(
+      (sum, item) => sum + item.totalQuantity,
+      0
+    );
+    const totalValue = items.reduce((sum, item) => sum + item.totalValue, 0);
+
+    return {
+      audit: {
+        id: audit.id,
+        month: audit.month,
+        year: audit.year,
+        monthName,
+        status: audit.status,
+      },
+      items,
+      totalQuantity,
+      totalValue,
+    };
+  });
+
+  // Filter out months with no items for this status
+  const filteredData = monthlyData.filter((data) => data.items.length > 0);
+
+  return {
+    status,
+    monthlyData: filteredData,
+  };
+};
+
 // Import price recalculation functions
 import {
   recalculateAuditPrices,
@@ -1553,6 +1706,7 @@ export const auditService = {
   cleanupZeroQuantityItems,
   syncAuditWithAssetPurchases,
   getDashboardTotals,
+  getStatusHistory,
   recalculateAuditPrices,
   recalculateLatestAuditPrices,
   recalculateItemPrices,

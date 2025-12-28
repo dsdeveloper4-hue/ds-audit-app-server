@@ -2,58 +2,64 @@
 import { Router } from "express";
 import { auditController } from "./audit.controller";
 import auth from "@app/middlewares/auth";
-import { roleAuth } from "@app/middlewares/roleAuth";
-import { Role } from "@prisma/client";
+import { checkPermission } from "@app/middlewares/checkPermission";
 
 const router = Router();
 
-// Audit routes - role-based access
+// Audit routes - permission-based access
 router.post(
   "/",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN]),
+  checkPermission("create_audit"),
   auditController.createAudit
 );
 
 router.get(
   "/",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
+  checkPermission("view_audits"),
   auditController.getAllAudits
 );
 
 router.get(
   "/latest",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
+  checkPermission("view_audits"),
   auditController.getLatestAudit
 );
 
 router.get(
   "/dashboard-totals",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
+  checkPermission("view_dashboard"),
   auditController.getDashboardTotals
+);
+
+router.get(
+  "/status-history/:status",
+  auth(),
+  checkPermission("view_audits"),
+  auditController.getStatusHistory
 );
 
 router.get(
   "/:id/summary",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
+  checkPermission("view_audits"),
   auditController.getItemSummaryByAuditId
 );
 
 router.get(
   "/:id",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
+  checkPermission("view_audits"),
   auditController.getAuditById
 );
 
 router.patch(
   "/:id",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN]),
+  checkPermission("edit_audit"),
   auditController.updateAudit
 );
 
@@ -61,7 +67,7 @@ router.patch(
 router.patch(
   "/:id/adjustment",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN]),
+  checkPermission("edit_audit"),
   auditController.updateAdjustment
 );
 
@@ -69,7 +75,7 @@ router.patch(
 router.post(
   "/:id/cleanup",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN]),
+  checkPermission("manage_audit_items"),
   auditController.cleanupZeroQuantityItems
 );
 
@@ -77,7 +83,7 @@ router.post(
 router.post(
   "/:id/sync",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN]),
+  checkPermission("manage_audit_items"),
   auditController.syncAuditWithAssetPurchases
 );
 
@@ -85,7 +91,7 @@ router.post(
 router.post(
   "/:id/recalculate-prices",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN]),
+  checkPermission("manage_audit_items"),
   auditController.recalculateAuditPrices
 );
 
@@ -93,7 +99,7 @@ router.post(
 router.post(
   "/latest/recalculate-prices",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN]),
+  checkPermission("manage_audit_items"),
   auditController.recalculateLatestAuditPrices
 );
 
@@ -101,28 +107,28 @@ router.post(
 router.post(
   "/:audit_id/items",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
+  checkPermission("manage_audit_items"),
   auditController.addItemDetailToAudit
 );
 
 router.patch(
   "/items/:detail_id",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
+  checkPermission("manage_audit_items"),
   auditController.updateItemDetail
 );
 
 router.delete(
   "/items/:detail_id",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN]),
+  checkPermission("delete_audit"),
   auditController.deleteItemDetail
 );
 
 router.delete(
   "/:id",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN]),
+  checkPermission("delete_audit"),
   auditController.deleteAudit
 );
 

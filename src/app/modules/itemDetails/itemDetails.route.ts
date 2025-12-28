@@ -2,51 +2,50 @@
 import { Router } from "express";
 import { itemDetailsController } from "./itemDetails.controller";
 import auth from "@app/middlewares/auth";
-import { roleAuth } from "@app/middlewares/roleAuth";
-import { Role } from "@prisma/client";
+import { checkPermission } from "@app/middlewares/checkPermission";
 
 const router = Router();
 
-// Item Details routes - role-based access
+// Item Details routes - permission-based access
 router.post(
   "/",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
+  checkPermission("manage_audit_items"),
   itemDetailsController.createItemDetails
 );
 
 router.get(
   "/",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
+  checkPermission("view_audits"),
   itemDetailsController.getAllItemDetails
 );
 
 router.get(
   "/:id",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
+  checkPermission("view_audits"),
   itemDetailsController.getItemDetailsById
 );
 
 router.get(
   "/room/:room_id/item/:item_id",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
+  checkPermission("view_audits"),
   itemDetailsController.getItemDetailsByRoomAndItem
 );
 
 router.patch(
   "/:id",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
+  checkPermission("manage_audit_items"),
   itemDetailsController.updateItemDetails
 );
 
 router.delete(
   "/:id",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN]),
+  checkPermission("delete_audit"),
   itemDetailsController.deleteItemDetails
 );
 

@@ -7,19 +7,44 @@ import bcrypt from "bcryptjs";
 import config from "@app/config";
 import { User, Role } from "@prisma/client";
 
+// ---------------- HELPER: GRANT ALL PERMISSIONS TO USER ----------------
+const grantAllPermissionsToUser = async (userId: string): Promise<void> => {
+  // Fetch all available permissions
+  const allPermissions = await prisma.permission.findMany({
+    select: { id: true, name: true },
+  });
+
+  // Create UserPermission records for each permission
+  const userPermissions = allPermissions.map((permission) => ({
+    user_id: userId,
+    permission_id: permission.id,
+    granted: true,
+  }));
+
+  // Bulk create all permissions for the user
+  await prisma.userPermission.createMany({
+    data: userPermissions,
+    skipDuplicates: true, // Skip if permission already exists
+  });
+
+  console.log(
+    `✅ Granted ${allPermissions.length} permissions to user ${userId}`
+  );
+};
+
 // ---------------- CREATE USER ----------------
 const createUser = async (req: Request): Promise<Omit<User, "password">> => {
   const currentUser = req.user as User;
-  const { name, mobile, password, role } = req.body as {
+  const { name, email, password, role } = req.body as {
     name: string;
-    mobile: string;
+    email: string;
     password: string;
     role: Role;
   };
-  if (!name || !mobile || !password || !role) {
+  if (!name || !email || !password || !role) {
     throw new AppError(
       httpStatus.BAD_REQUEST,
-      "Name, mobile, password, and role are required"
+      "Name, email, password, and role are required"
     );
   }
 
@@ -29,9 +54,9 @@ const createUser = async (req: Request): Promise<Omit<User, "password">> => {
   }
 
   // Check if user already exists
-  const existingUser = await prisma.user.findUnique({ where: { mobile } });
+  const existingUser = await prisma.user.findUnique({ where: { email } });
   if (existingUser) {
-    throw new AppError(httpStatus.CONFLICT, "Mobile number already registered");
+    throw new AppError(httpStatus.CONFLICT, "Email already registered");
   }
 
   // Admin role restrictions (handled in middleware but double-check here)
@@ -45,6 +70,15 @@ const createUser = async (req: Request): Promise<Omit<User, "password">> => {
     );
   }
 
+  // EDITOR role restrictions - EDITOR cannot create users at all (defense in depth)
+  // This is blocked by route guards, but adding explicit check for security
+  if (currentUser.role === "EDITOR") {
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      "Editors do not have permission to create users"
+    );
+  }
+
   const hashedPassword = await bcrypt.hash(
     password,
     Number(config.salt_rounds)
@@ -53,11 +87,17 @@ const createUser = async (req: Request): Promise<Omit<User, "password">> => {
   const user = await prisma.user.create({
     data: {
       name,
-      mobile,
+      email,
       password: hashedPassword,
       role,
+      auth_provider: "local",
     },
   });
+
+  // If user is SUPER_ADMIN, grant all permissions
+  if (role === "SUPER_ADMIN") {
+    await grantAllPermissionsToUser(user.id);
+  }
 
   // Log creation in history
   await prisma.recentActivityHistory.create({
@@ -67,7 +107,7 @@ const createUser = async (req: Request): Promise<Omit<User, "password">> => {
       entity_id: user.id,
       entity_name: user.name,
       action_type: "CREATE",
-      after: { name: user.name, mobile: user.mobile, role: user.role },
+      after: { name: user.name, email: user.email, role: user.role },
       description: `Created user: ${user.name} (${user.role})`,
     },
   });
@@ -109,9 +149,9 @@ const updateUser = async (
   req: Request
 ): Promise<Omit<User, "password">> => {
   const currentUser = req.user as User;
-  const { name, mobile, role, password } = req.body as {
+  const { name, email, role, password } = req.body as {
     name?: string;
-    mobile?: string;
+    email?: string;
     role?: Role;
     password?: string;
   };
@@ -149,14 +189,20 @@ const updateUser = async (
     );
   }
 
-  // Check if mobile is being changed and already exists
-  if (mobile && mobile !== user.mobile) {
-    const existingUser = await prisma.user.findUnique({ where: { mobile } });
+  // EDITOR role restrictions - EDITOR cannot modify any users (defense in depth)
+  // This is blocked by route guards, but adding explicit check for security
+  if (currentUser.role === "EDITOR") {
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      "Editors do not have permission to modify users"
+    );
+  }
+
+  // Check if email is being changed and already exists
+  if (email && email !== user.email) {
+    const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
-      throw new AppError(
-        httpStatus.CONFLICT,
-        "Mobile number already registered"
-      );
+      throw new AppError(httpStatus.CONFLICT, "Email already registered");
     }
   }
 
@@ -171,23 +217,28 @@ const updateUser = async (
     hashedPassword = await bcrypt.hash(password, Number(config.salt_rounds));
   }
 
-  const before = { name: user.name, mobile: user.mobile, role: user.role };
+  const before = { name: user.name, email: user.email, role: user.role };
 
   const updatedUser = await prisma.user.update({
     where: { id },
     data: {
       ...(name && { name }),
-      ...(mobile && { mobile }),
+      ...(email && { email }),
       ...(role && { role }),
       ...(hashedPassword && { password: hashedPassword }),
     },
   });
 
+  // If role is being changed to SUPER_ADMIN, grant all permissions
+  if (role && role === "SUPER_ADMIN" && user.role !== "SUPER_ADMIN") {
+    await grantAllPermissionsToUser(updatedUser.id);
+  }
+
   // Log update in history
   const changes: string[] = [];
   if (name && name !== user.name) changes.push(`name: ${user.name} → ${name}`);
-  if (mobile && mobile !== user.mobile)
-    changes.push(`mobile: ${user.mobile} → ${mobile}`);
+  if (email && email !== user.email)
+    changes.push(`email: ${user.email} → ${email}`);
   if (role && role !== user.role) changes.push(`role: ${user.role} → ${role}`);
   if (password) changes.push(`password updated`);
 
@@ -202,7 +253,7 @@ const updateUser = async (
         before,
         after: {
           name: updatedUser.name,
-          mobile: updatedUser.mobile,
+          email: updatedUser.email,
           role: updatedUser.role,
         },
         change_summary: { changes },
@@ -237,6 +288,15 @@ const deleteUser = async (
     );
   }
 
+  // EDITOR role restrictions - EDITOR cannot delete any users (defense in depth)
+  // This is blocked by route guards, but adding explicit check for security
+  if (currentUser.role === "EDITOR") {
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      "Editors do not have permission to delete users"
+    );
+  }
+
   if (user.role === "SUPER_ADMIN") {
     throw new AppError(httpStatus.FORBIDDEN, "Super Admins cannot be deleted");
   }
@@ -253,7 +313,7 @@ const deleteUser = async (
       entity_id: user.id,
       entity_name: user.name,
       action_type: "DELETE",
-      before: { name: user.name, mobile: user.mobile, role: user.role },
+      before: { name: user.name, email: user.email, role: user.role },
       description: `Deleted user: ${user.name} (${user.role})`,
     },
   });

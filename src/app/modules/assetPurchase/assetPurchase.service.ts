@@ -3,8 +3,29 @@ import { Request } from "express";
 import AppError from "@app/errors/AppError";
 import prisma from "@app/lib/prisma";
 import httpStatus from "http-status";
-import { User } from "@prisma/client";
+import { User, EmployeeStatus } from "@prisma/client";
 import { uploadImage } from "@app/lib/cloudinary";
+
+// Validate employee assignment
+const validateEmployeeAssignment = async (employeeId: string) => {
+  const employee = await prisma.employee.findUnique({
+    where: { id: employeeId },
+  });
+
+  if (!employee) {
+    throw new AppError(httpStatus.NOT_FOUND, "Employee not found");
+  }
+
+  const assignableStatuses: EmployeeStatus[] = ["ACTIVE", "ON_LEAVE"];
+  if (!assignableStatuses.includes(employee.status)) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      `Cannot assign to ${employee.status} employee: ${employee.name} (${employee.employee_id})`
+    );
+  }
+
+  return employee;
+};
 
 // ---------------- CREATE ASSET PURCHASE ----------------
 const createAssetPurchase = async (req: Request): Promise<any> => {
@@ -20,16 +41,60 @@ const createAssetPurchase = async (req: Request): Promise<any> => {
   const notes = req.body.notes;
   const status = req.body.status || "Active";
   const assigned_by_name = req.body.assigned_by_name;
+  const assigned_employee_id = req.body.assigned_employee_id;
+
+  // Parse employee_ids array (for multi-select assignment)
+  let employee_ids: string[] = [];
+  if (req.body.employee_ids) {
+    try {
+      employee_ids = JSON.parse(req.body.employee_ids);
+    } catch {
+      console.log("⚠️ Could not parse employee_ids, treating as empty");
+    }
+  }
 
   console.log("📝 [createAssetPurchase] Received data:");
   console.log("  - status:", status);
   console.log("  - assigned_by_name:", assigned_by_name);
   console.log("  - serial_number:", serial_number);
+  console.log("  - employee_ids:", employee_ids);
 
   if (!room_id || !item_id || !quantity || !unit_price) {
     throw new AppError(
       httpStatus.BAD_REQUEST,
       "Room, item, quantity, and unit price are required"
+    );
+  }
+
+  // Validate serial number is required
+  if (!serial_number || !serial_number.trim()) {
+    throw new AppError(httpStatus.BAD_REQUEST, "Serial number is required");
+  }
+
+  // Validate all employees if provided (multi-select)
+  for (const empId of employee_ids) {
+    await validateEmployeeAssignment(empId);
+  }
+
+  // Also validate single assigned_employee_id (legacy support)
+  if (assigned_employee_id) {
+    await validateEmployeeAssignment(assigned_employee_id);
+  }
+
+  // Check for duplicate serial number
+  const existingPurchase = await prisma.assetPurchase.findFirst({
+    where: {
+      serial_number: serial_number.trim(),
+    },
+    include: {
+      item: true,
+    },
+  });
+
+  if (existingPurchase) {
+    throw new AppError(
+      httpStatus.CONFLICT,
+      `Serial number "${serial_number}" is already used by ${existingPurchase.item.name}`
     );
   }
 
@@ -148,7 +213,8 @@ const createAssetPurchase = async (req: Request): Promise<any> => {
         item_image_url,
         billing_image_url,
         status,
-        assigned_by_name,
+        assigned_employee_id,
+        assigned_by_name: assigned_employee_id ? null : assigned_by_name, // Clear legacy if using employee
         added_by: user.id,
       },
       include: {
@@ -158,7 +224,18 @@ const createAssetPurchase = async (req: Request): Promise<any> => {
           select: {
             id: true,
             name: true,
-            mobile: true,
+            email: true,
+          },
+        },
+        assignedEmployee: {
+          select: {
+            id: true,
+            employee_id: true,
+            name: true,
+            email: true,
+            status: true,
+            designation: true,
+            department: true,
           },
         },
       },
@@ -342,15 +419,34 @@ const createAssetPurchase = async (req: Request): Promise<any> => {
         entity_name: `${item.name} - ${room.name}`,
         action_type: "CREATE",
         after: assetPurchase,
-        description: `Added ${quantity} ${item.name}(s) to ${
-          room.name
-        } (Total: ${total_cost})${
-          latestAudit
+        description: `Added ${quantity} ${item.name}(s) to ${room.name
+          } (Total: ${total_cost})${latestAudit
             ? ` - Added to audit ${latestAudit.month}/${latestAudit.year}`
             : ""
-        }`,
+          }`,
       },
     });
+
+    // Sync to EntityAssignment table for all selected employees
+    const allEmployeeIds = [...employee_ids];
+    // Also include single assigned_employee_id if provided (legacy support)
+    if (assigned_employee_id && !allEmployeeIds.includes(assigned_employee_id)) {
+      allEmployeeIds.push(assigned_employee_id);
+    }
+
+    for (const empId of allEmployeeIds) {
+      await tx.entityAssignment.create({
+        data: {
+          entity_type: "ASSET_PURCHASE",
+          entity_id: assetPurchase.id,
+          employee_id: empId,
+          assigned_by: user.id,
+        },
+      });
+    }
+    if (allEmployeeIds.length > 0) {
+      console.log(`✅ Created ${allEmployeeIds.length} EntityAssignment(s) for asset ${assetPurchase.id}`);
+    }
 
     return assetPurchase;
   });
@@ -386,7 +482,18 @@ const getAllAssetPurchases = async (req: Request): Promise<any> => {
         select: {
           id: true,
           name: true,
-          mobile: true,
+          email: true,
+        },
+      },
+      assignedEmployee: {
+        select: {
+          id: true,
+          employee_id: true,
+          name: true,
+          email: true,
+          status: true,
+          designation: true,
+          department: true,
         },
       },
     },
@@ -409,7 +516,18 @@ const getAssetPurchaseById = async (id: string): Promise<any> => {
         select: {
           id: true,
           name: true,
-          mobile: true,
+          email: true,
+        },
+      },
+      assignedEmployee: {
+        select: {
+          id: true,
+          employee_id: true,
+          name: true,
+          email: true,
+          status: true,
+          designation: true,
+          department: true,
         },
       },
     },
@@ -437,15 +555,48 @@ const updateAssetPurchase = async (id: string, req: Request): Promise<any> => {
   const purchase_date = req.body.purchase_date;
   const notes = req.body.notes;
   const assigned_by_name = req.body.assigned_by_name;
+  const assigned_employee_id = req.body.assigned_employee_id;
   const status = req.body.status;
 
   const purchase = await prisma.assetPurchase.findUnique({
     where: { id },
-    include: { room: true, item: true },
+    include: { room: true, item: true, assignedEmployee: true },
   });
 
   if (!purchase) {
     throw new AppError(httpStatus.NOT_FOUND, "Asset purchase not found");
+  }
+
+  // Validate employee if provided
+  if (assigned_employee_id && assigned_employee_id !== purchase.assigned_employee_id) {
+    await validateEmployeeAssignment(assigned_employee_id);
+  }
+
+  // Validate serial number if provided
+  if (serial_number !== undefined) {
+    if (!serial_number || !serial_number.trim()) {
+      throw new AppError(httpStatus.BAD_REQUEST, "Serial number is required");
+    }
+
+    // Check for duplicate serial number (excluding current purchase)
+    const existingPurchase = await prisma.assetPurchase.findFirst({
+      where: {
+        serial_number: serial_number.trim(),
+        NOT: {
+          id: id, // Exclude current purchase
+        },
+      },
+      include: {
+        item: true,
+      },
+    });
+
+    if (existingPurchase) {
+      throw new AppError(
+        httpStatus.CONFLICT,
+        `Serial number "${serial_number}" is already used by ${existingPurchase.item.name}`
+      );
+    }
   }
 
   // Verify room if provided
@@ -576,7 +727,7 @@ const updateAssetPurchase = async (id: string, req: Request): Promise<any> => {
           select: {
             id: true,
             name: true,
-            mobile: true,
+            email: true,
           },
         },
       },
@@ -687,20 +838,29 @@ const updateAssetPurchase = async (id: string, req: Request): Promise<any> => {
               const oldStatusField = getStatusField(oldStatus);
               const newStatusField = getStatusField(newStatus);
 
+              // Build update data dynamically to ensure all status fields are set correctly
+              const updateData: any = {
+                active_quantity: 0,
+                inactive_quantity: 0,
+                broken_quantity: 0,
+                lost_quantity: 0,
+                unit_price: newUnitPrice,
+                total_price: newUnitPrice,
+              };
+
+              // Set the new status field to 1
+              updateData[newStatusField] = 1;
+
               // For serial-tracked items, quantity is always 1
               await tx.itemDetails.update({
                 where: { id: itemDetail.id },
-                data: {
-                  [oldStatusField]: 0,
-                  [newStatusField]: 1,
-                  unit_price: newUnitPrice,
-                  total_price: newUnitPrice,
-                },
+                data: updateData,
               });
 
               console.log(
                 `✅ Updated status for serial ${oldSerialNumber}: ${oldStatus} → ${newStatus}`
               );
+              console.log(`✅ Updated data:`, updateData);
             }
           }
           // If serial number changed but room didn't
@@ -748,6 +908,7 @@ const updateAssetPurchase = async (id: string, req: Request): Promise<any> => {
           }
 
           // DEDICATED STATUS-ONLY SYNC (independent of room changes)
+          // This handles the case where ONLY status changes (no room change)
           if (statusChanged && !roomChanged && oldSerialNumber) {
             console.log(
               `🔄 [updateAssetPurchase] Status-only change for serial: ${oldSerialNumber}`
@@ -770,19 +931,28 @@ const updateAssetPurchase = async (id: string, req: Request): Promise<any> => {
                 `🔄 Updating quantities: ${oldStatusField}=0, ${newStatusField}=1`
               );
 
+              // Build update data dynamically to ensure all status fields are set correctly
+              const updateData: any = {
+                active_quantity: 0,
+                inactive_quantity: 0,
+                broken_quantity: 0,
+                lost_quantity: 0,
+                unit_price: newUnitPrice,
+                total_price: newUnitPrice,
+              };
+
+              // Set the new status field to 1
+              updateData[newStatusField] = 1;
+
               await tx.itemDetails.update({
                 where: { id: itemDetail.id },
-                data: {
-                  [oldStatusField]: 0,
-                  [newStatusField]: 1,
-                  unit_price: newUnitPrice,
-                  total_price: newUnitPrice,
-                },
+                data: updateData,
               });
 
               console.log(
                 `✅ Status-only update completed for serial ${oldSerialNumber}: ${oldStatus} → ${newStatus}`
               );
+              console.log(`✅ Updated data:`, updateData);
             } else {
               console.log(
                 `❌ No ItemDetails found for serial: ${oldSerialNumber}`
@@ -1100,6 +1270,39 @@ const updateAssetPurchase = async (id: string, req: Request): Promise<any> => {
       });
     }
 
+    // Sync EntityAssignment if assigned_employee_id changed
+    if (assigned_employee_id !== undefined && assigned_employee_id !== purchase.assigned_employee_id) {
+      // Unassign previous employee if any
+      if (purchase.assigned_employee_id) {
+        await tx.entityAssignment.updateMany({
+          where: {
+            entity_type: "ASSET_PURCHASE",
+            entity_id: id,
+            employee_id: purchase.assigned_employee_id,
+            unassigned_at: null,
+          },
+          data: {
+            unassigned_at: new Date(),
+            unassigned_by: user.id,
+          },
+        });
+        console.log(`✅ Unassigned employee ${purchase.assigned_employee_id} from asset ${id}`);
+      }
+
+      // Assign new employee if provided
+      if (assigned_employee_id) {
+        await tx.entityAssignment.create({
+          data: {
+            entity_type: "ASSET_PURCHASE",
+            entity_id: id,
+            employee_id: assigned_employee_id,
+            assigned_by: user.id,
+          },
+        });
+        console.log(`✅ Assigned employee ${assigned_employee_id} to asset ${id}`);
+      }
+    }
+
     return updatedPurchase;
   });
 
@@ -1182,19 +1385,187 @@ const deleteAssetPurchase = async (id: string, req: Request): Promise<any> => {
     throw new AppError(httpStatus.NOT_FOUND, "Asset purchase not found");
   }
 
-  await prisma.assetPurchase.delete({ where: { id } });
+  // Use transaction to ensure atomicity
+  await prisma.$transaction(async (tx) => {
+    // If this purchase has a serial number, delete the corresponding ItemDetails records
+    if (purchase.serial_number) {
+      console.log(
+        `🗑️ Deleting ItemDetails for serial number: ${purchase.serial_number}`
+      );
 
-  // Log deletion in history
-  await prisma.recentActivityHistory.create({
-    data: {
-      user_id: user.id,
-      entity_type: "AssetPurchase",
-      entity_id: purchase.id,
-      entity_name: `${purchase.item.name} - ${purchase.room.name}`,
-      action_type: "DELETE",
-      before: purchase,
-      description: `Deleted asset purchase: ${purchase.quantity} ${purchase.item.name}(s) from ${purchase.room.name}`,
-    },
+      // Find all ItemDetails records with this serial number
+      const itemDetailsToDelete = await tx.itemDetails.findMany({
+        where: {
+          item_serial_no: purchase.serial_number,
+        },
+        include: {
+          audit: true,
+        },
+      });
+
+      // Delete all ItemDetails records with this serial number
+      await tx.itemDetails.deleteMany({
+        where: {
+          item_serial_no: purchase.serial_number,
+        },
+      });
+
+      console.log(
+        `✅ Deleted ${itemDetailsToDelete.length} ItemDetails record(s) for serial ${purchase.serial_number}`
+      );
+
+      // Log each ItemDetails deletion
+      for (const detail of itemDetailsToDelete) {
+        await tx.recentActivityHistory.create({
+          data: {
+            user_id: user.id,
+            entity_type: "ItemDetails",
+            entity_id: detail.id,
+            entity_name: `${purchase.item.name} (Serial: ${purchase.serial_number}) - ${purchase.room.name}`,
+            action_type: "DELETE",
+            before: detail,
+            description: `Removed ${purchase.item.name} (Serial: ${purchase.serial_number}) from audit ${detail.audit.month}/${detail.audit.year} due to asset purchase deletion`,
+            metadata: {
+              audit_id: detail.audit_id,
+              room_id: detail.room_id,
+              item_id: detail.item_id,
+              serial_number: purchase.serial_number,
+              reason: "asset_purchase_deleted",
+            },
+          },
+        });
+      }
+    } else {
+      // No serial number - this is an aggregated purchase
+      // Find ItemDetails linked to this purchase
+      const itemDetailsToUpdate = await tx.itemDetails.findMany({
+        where: {
+          asset_purchase_id: id,
+        },
+        include: {
+          audit: true,
+        },
+      });
+
+      console.log(
+        `🗑️ Found ${itemDetailsToUpdate.length} ItemDetails record(s) linked to this purchase`
+      );
+
+      // For aggregated items, decrease the quantity
+      for (const detail of itemDetailsToUpdate) {
+        const statusField =
+          purchase.status === "Active"
+            ? "active_quantity"
+            : purchase.status === "Inactive"
+              ? "inactive_quantity"
+              : purchase.status === "Damage"
+                ? "broken_quantity"
+                : purchase.status === "Lost"
+                  ? "lost_quantity"
+                  : "active_quantity";
+
+        const currentQty = detail[statusField as keyof typeof detail] as number;
+        const newQty = Math.max(0, currentQty - purchase.quantity);
+
+        // Calculate new total quantity
+        const newTotalQty =
+          (statusField === "active_quantity"
+            ? newQty
+            : detail.active_quantity) +
+          (statusField === "inactive_quantity"
+            ? newQty
+            : detail.inactive_quantity) +
+          (statusField === "broken_quantity"
+            ? newQty
+            : detail.broken_quantity) +
+          (statusField === "lost_quantity"
+            ? newQty
+            : detail.lost_quantity || 0);
+
+        // If all quantities are zero, delete the ItemDetails record
+        if (newTotalQty === 0) {
+          await tx.itemDetails.delete({
+            where: { id: detail.id },
+          });
+
+          console.log(
+            `✅ Deleted ItemDetails record (all quantities = 0 after deletion)`
+          );
+
+          await tx.recentActivityHistory.create({
+            data: {
+              user_id: user.id,
+              entity_type: "ItemDetails",
+              entity_id: detail.id,
+              entity_name: `${purchase.item.name} - ${purchase.room.name}`,
+              action_type: "DELETE",
+              before: detail,
+              description: `Removed ${purchase.item.name} from audit ${detail.audit.month}/${detail.audit.year} (all quantities = 0 after asset purchase deletion)`,
+              metadata: {
+                audit_id: detail.audit_id,
+                room_id: detail.room_id,
+                item_id: detail.item_id,
+                reason: "asset_purchase_deleted",
+              },
+            },
+          });
+        } else {
+          // Decrease the quantity
+          const newTotalPrice = newTotalQty * (Number(detail.unit_price) || 0);
+
+          await tx.itemDetails.update({
+            where: { id: detail.id },
+            data: {
+              [statusField]: newQty,
+              total_price: newTotalPrice,
+              asset_purchase_id: null, // Unlink from this purchase
+            },
+          });
+
+          console.log(
+            `✅ Decreased ${statusField} in ItemDetails: ${currentQty} → ${newQty}`
+          );
+
+          await tx.recentActivityHistory.create({
+            data: {
+              user_id: user.id,
+              entity_type: "ItemDetails",
+              entity_id: detail.id,
+              entity_name: `${purchase.item.name} - ${purchase.room.name}`,
+              action_type: "UPDATE",
+              before: detail,
+              description: `Decreased ${purchase.item.name} quantity in audit ${detail.audit.month}/${detail.audit.year} due to asset purchase deletion`,
+              metadata: {
+                audit_id: detail.audit_id,
+                room_id: detail.room_id,
+                item_id: detail.item_id,
+                old_quantity: currentQty,
+                new_quantity: newQty,
+                reason: "asset_purchase_deleted",
+              },
+            },
+          });
+        }
+      }
+    }
+
+    // Delete the asset purchase
+    await tx.assetPurchase.delete({ where: { id } });
+
+    // Log asset purchase deletion in history
+    await tx.recentActivityHistory.create({
+      data: {
+        user_id: user.id,
+        entity_type: "AssetPurchase",
+        entity_id: purchase.id,
+        entity_name: `${purchase.item.name} - ${purchase.room.name}`,
+        action_type: "DELETE",
+        before: purchase,
+        description: `Deleted asset purchase: ${purchase.quantity} ${purchase.item.name
+          }(s) from ${purchase.room.name}${purchase.serial_number ? ` (Serial: ${purchase.serial_number})` : ""
+          }`,
+      },
+    });
   });
 
   return { message: "Asset purchase deleted successfully" };

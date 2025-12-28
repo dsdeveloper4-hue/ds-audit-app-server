@@ -18,7 +18,7 @@ const getRecentActivity = async (req: Request): Promise<any> => {
         select: {
           id: true,
           name: true,
-          mobile: true,
+          email: true,
           role: true,
         },
       },
@@ -40,24 +40,25 @@ const getActivityStats = async (): Promise<any> => {
   const thisWeek = new Date();
   thisWeek.setDate(thisWeek.getDate() - 7);
 
-  const [totalActivities, todayActivities, weekActivities, byEntityType] = await Promise.all([
-    prisma.recentActivityHistory.count(),
-    prisma.recentActivityHistory.count({
-      where: { occurred_at: { gte: today } },
-    }),
-    prisma.recentActivityHistory.count({
-      where: { occurred_at: { gte: thisWeek } },
-    }),
-    prisma.recentActivityHistory.groupBy({
-      by: ["entity_type"],
-      _count: true,
-      orderBy: {
-        _count: {
-          entity_type: "desc",
+  const [totalActivities, todayActivities, weekActivities, byEntityType] =
+    await Promise.all([
+      prisma.recentActivityHistory.count(),
+      prisma.recentActivityHistory.count({
+        where: { occurred_at: { gte: today } },
+      }),
+      prisma.recentActivityHistory.count({
+        where: { occurred_at: { gte: thisWeek } },
+      }),
+      prisma.recentActivityHistory.groupBy({
+        by: ["entity_type"],
+        _count: true,
+        orderBy: {
+          _count: {
+            entity_type: "desc",
+          },
         },
-      },
-    }),
-  ]);
+      }),
+    ]);
 
   return {
     totalActivities,

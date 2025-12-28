@@ -2,50 +2,50 @@
 import { Router } from "express";
 import { userController } from "./user.controller";
 import auth from "@app/middlewares/auth";
-import { userManagementAuth } from "@app/middlewares/roleAuth";
+import { checkPermission } from "@app/middlewares/checkPermission";
 
 const router = Router();
 
-// User management routes - role-based access
+// User management routes - permission-based access
 router.post(
   "/",
   auth(),
-  userManagementAuth("create"),
+  checkPermission("create_user"),
   userController.createUser
 );
 
 router.get(
   "/",
   auth(),
-  userManagementAuth("read"),
+  checkPermission("view_users"),
   userController.getAllUsers
 );
 
 router.get(
   "/roles",
   auth(),
-  userManagementAuth("read"),
+  checkPermission("view_users"),
   userController.getAllRoles
 );
 
 router.get(
   "/:id",
   auth(),
-  userManagementAuth("read"),
+  checkPermission("view_users"),
   userController.getUserById
 );
 
 router.patch(
   "/:id",
   auth(),
-  userManagementAuth("update"),
+  checkPermission("edit_user"),
   userController.updateUser
 );
 
 router.delete(
   "/:id",
   auth(),
-  userManagementAuth("delete"),
+  checkPermission("delete_user"),
   userController.deleteUser
 );
 

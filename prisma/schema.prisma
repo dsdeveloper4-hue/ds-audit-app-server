@@ -13,6 +13,7 @@ datasource db {
 enum Role {
   SUPER_ADMIN
   ADMIN
+  EDITOR
   USER
 }
 
@@ -30,16 +31,67 @@ enum ActivityType {
 }
 
 /*
+  PERMISSIONS & ROLES
+*/
+model Permission {
+  id          String            @id @default(uuid())
+  name        String            @unique  // e.g., "create_audit", "edit_user", "view_reports"
+  description String?                    // Human-readable description
+  category    String?                    // e.g., "audit", "user", "report", "dashboard"
+  created_at  DateTime          @default(now())
+  updated_at  DateTime          @updatedAt
+
+  // Relations
+  userPermissions UserPermission[]
+  rolePermissions RolePermission[]
+
+  @@index([category])
+}
+
+model RolePermission {
+  id            String      @id @default(uuid())
+  role          Role
+  permission_id String
+  permission    Permission  @relation(fields: [permission_id], references: [id], onDelete: Cascade)
+  created_at    DateTime    @default(now())
+
+  @@unique([role, permission_id])
+  @@index([role])
+  @@index([permission_id])
+}
+
+model UserPermission {
+  id            String      @id @default(uuid())
+  user_id       String
+  permission_id String
+  granted       Boolean     @default(true)  // true = granted, false = revoked
+  created_at    DateTime    @default(now())
+  updated_at    DateTime    @updatedAt
+
+  user          User        @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  permission    Permission  @relation(fields: [permission_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, permission_id])
+  @@index([user_id])
+  @@index([permission_id])
+}
+
+/*
   USERS
 */
 model User {
-  id             String                 @id @default(uuid())
-  name           String
-  mobile         String                 @unique
-  password       String
-  role           Role                   @default(USER)
-  created_at     DateTime               @default(now())
-  updated_at     DateTime               @updatedAt
+  id                    String                 @id @default(uuid())
+  name                  String
+  email                 String                 @unique
+  google_id             String?                @unique
+  profile_image         String?
+  password              String?                // Optional for Google OAuth users
+  role                  Role                   @default(USER)
+  auth_provider         String                 @default("google") // "google" or "local"
+  reset_token           String?                @unique
+  reset_token_expires   DateTime?
+  created_at            DateTime               @default(now())
+  updated_at            DateTime               @updatedAt
 
   // Many-to-many relation with audits
   audits         Audit[]                @relation("AuditParticipants")
@@ -49,6 +101,51 @@ model User {
   
   // Asset purchases added by this user
   assetPurchases AssetPurchase[]
+  
+  // Dynamic permissions
+  userPermissions UserPermission[]
+  
+  @@index([email])
+  @@index([google_id])
+  @@index([reset_token])
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+  RESIGNED
+  ON_LEAVE
+}
+
+model Employee {
+  id                 String           @id @default(uuid())
+  employee_id        String           @unique  // Business key: DS001, DS-ADMIN, etc.
+  name               String
+  email              String           @unique
+  joining_date       DateTime?
+  department         String?
+  designation        String?
+  workplace          String?
+  employment_type    String?
+  
+  // Status management
+  status             EmployeeStatus   @default(ACTIVE)
+  status_reason      String?
+  status_changed_at  DateTime?
+  
+  // Relations
+  assetPurchases     AssetPurchase[]
+  assignments        EntityAssignment[]  // Centralized assignments
+  
+  created_at         DateTime         @default(now())
+  updated_at         DateTime         @updatedAt
+  
+  @@index([employee_id])
+  @@index([email])
+  @@index([status])
+  @@index([name])
+  @@index([department])
+  @@index([created_at])
 }
 
 /*
@@ -174,8 +271,12 @@ model AssetPurchase {
   billing_image_url  String?
   
   // Audit fields
-  assigned_by_name   String?
-  status             String?     @default("Active")
+  assigned_by_name     String?  // Legacy text-based assignment
+  status               String?  @default("Active")
+  
+  // Employee assignment (new)
+  assigned_employee_id String?
+  assignedEmployee     Employee? @relation(fields: [assigned_employee_id], references: [id], onDelete: SetNull)
   
   // Who added this
   added_by        String?
@@ -194,6 +295,7 @@ model AssetPurchase {
   @@index([purchase_date])
   @@index([added_by])
   @@index([serial_number])
+  @@index([assigned_employee_id])
 }
 
 /*
@@ -239,4 +341,36 @@ model RecentActivityHistory {
   @@index([entity_type, entity_id])
   @@index([user_id, occurred_at])
   @@index([occurred_at])
+}
+
+/*
+  ENTITY ASSIGNMENTS (Centralized, Entity-Agnostic)
+*/
+model EntityAssignment {
+  id            String      @id @default(uuid())
+  
+  // Entity-agnostic (String for flexibility)
+  entity_type   String      // "ASSET_PURCHASE", "AUDIT_ROOM", "ITEM", "ROOM", etc.
+  entity_id     String      // UUID of the assigned entity
+  
+  // Employee assignment
+  employee_id   String
+  employee      Employee    @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+  
+  // Assignment lifecycle
+  role          String?     // Optional: "PRIMARY", "BACKUP", etc.
+  assigned_at   DateTime    @default(now())
+  unassigned_at DateTime?   // NULL = active, SET = historical record
+  
+  // Audit trail
+  assigned_by   String?     // User ID who made the assignment
+  unassigned_by String?     // User ID who removed the assignment
+  
+  created_at    DateTime    @default(now())
+  updated_at    DateTime    @updatedAt
+  
+  @@index([entity_type, entity_id])
+  @@index([employee_id])
+  @@index([assigned_at])
+  @@index([unassigned_at])
 }

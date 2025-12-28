@@ -2,17 +2,16 @@
 import { Router } from "express";
 import { assetPurchaseController } from "./assetPurchase.controller";
 import auth from "@app/middlewares/auth";
-import { roleAuth } from "@app/middlewares/roleAuth";
+import { checkPermission } from "@app/middlewares/checkPermission";
 import upload from "@app/middlewares/upload";
-import { Role } from "@prisma/client";
 
 const router = Router();
 
-// Asset purchase routes
+// Asset purchase routes - permission-based access
 router.post(
   "/",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
+  checkPermission("create_asset_purchase"),
   upload.fields([
     { name: "item_image", maxCount: 1 },
     { name: "billing_image", maxCount: 1 },
@@ -23,28 +22,28 @@ router.post(
 router.get(
   "/",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
+  checkPermission("view_asset_purchases"),
   assetPurchaseController.getAllAssetPurchases
 );
 
 router.get(
   "/summary",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
+  checkPermission("view_asset_purchases"),
   assetPurchaseController.getPurchaseSummary
 );
 
 router.get(
   "/:id",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN, Role.USER]),
+  checkPermission("view_asset_purchases"),
   assetPurchaseController.getAssetPurchaseById
 );
 
 router.patch(
   "/:id",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN]),
+  checkPermission("edit_asset_purchase"),
   upload.fields([
     { name: "item_image", maxCount: 1 },
     { name: "billing_image", maxCount: 1 },
@@ -55,7 +54,7 @@ router.patch(
 router.delete(
   "/:id",
   auth(),
-  roleAuth([Role.SUPER_ADMIN, Role.ADMIN]),
+  checkPermission("delete_asset_purchase"),
   assetPurchaseController.deleteAssetPurchase
 );
 

@@ -8,21 +8,27 @@ export interface JwtConfig {
 }
 
 export interface cloudinary {
-  cloudname: string;         
+  cloudname: string;
   cloudinary_api_key: string;
   cloudinary_api_secret: string;
   cloudinary_url: string;
 }
 
+export interface EmailConfig {
+  user: string;
+  password: string;
+  from_name: string;
+}
 
 export interface Config {
   env: string;
   port: string;
   salt_rounds: string;
+  frontend_url: string;
   jwt: JwtConfig;
-  cloudinary: cloudinary
+  cloudinary: cloudinary;
+  email: EmailConfig;
 }
-
 
 export interface CustomJwtPayload extends JwtPayload {
   id: string;

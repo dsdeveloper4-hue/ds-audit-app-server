@@ -17,7 +17,7 @@ const requiredEnv = [
   "CLOUDNAME",
   "CLOUDINARY_API_KEY",
   "CLOUDINARY_API_SECRET",
-  "CLOUDINARY_URL"
+  "CLOUDINARY_URL",
 ] as const;
 
 requiredEnv.forEach((key) => {
@@ -30,6 +30,7 @@ const config: Config = {
   env: process.env.NODE_ENV!,
   port: process.env.PORT!,
   salt_rounds: process.env.SALT_ROUNDS!,
+  frontend_url: process.env.FRONTEND_URL || "http://localhost:3000",
   jwt: {
     access_token_secret: process.env.ACCESS_TOKEN_SECRET!,
     access_token_expires_in: process.env.ACCESS_TOKEN_EXPIRES_IN!,
@@ -41,6 +42,11 @@ const config: Config = {
     cloudinary_api_key: process.env.CLOUDINARY_API_KEY!,
     cloudinary_api_secret: process.env.CLOUDINARY_API_SECRET!,
     cloudinary_url: process.env.CLOUDINARY_URL!,
+  },
+  email: {
+    user: process.env.EMAIL_USER || "",
+    password: process.env.EMAIL_PASSWORD || "",
+    from_name: process.env.EMAIL_FROM_NAME || "Digital Seba Audit System",
   },
 };
 

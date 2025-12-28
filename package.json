@@ -7,6 +7,12 @@
     "dev": "nodemon --watch src --ext ts --exec ts-node -r tsconfig-paths/register src/server.ts",
     "build": "prisma generate && tsc",
     "seed": "ts-node -r tsconfig-paths/register src/app/lib/seed.ts",
+    "seed-permissions": "ts-node -r tsconfig-paths/register prisma/seed-permissions.ts",
+    "setup-super-admin": "ts-node -r tsconfig-paths/register src/app/lib/prisma.ts",
+    "migrate-admin": "ts-node -r tsconfig-paths/register src/scripts/migrate-super-admin.ts",
+    "grant-super-admin": "ts-node -r tsconfig-paths/register scripts/grant-super-admin-permissions.ts",
+    "fix-super-admins": "ts-node -r tsconfig-paths/register scripts/fix-existing-super-admins.ts",
+    "recalculate-audit": "ts-node -r tsconfig-paths/register scripts/recalculate-audit-from-purchases.ts",
     "start": "node -r module-alias/register dist/server.js"
   },
   "keywords": [],
@@ -27,6 +33,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^2.0.0",
     "@types/node": "^24.4.0",
+    "@types/nodemailer": "^7.0.4",
     "nodemon": "^3.1.10",
     "pino-pretty": "^13.1.1",
     "prisma": "^6.16.1",
@@ -43,10 +50,15 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
+    "google-auth-library": "^10.5.0",
     "http-status": "^2.1.0",
     "jsonwebtoken": "^9.0.2",
     "module-alias": "^2.2.3",
     "multer": "^2.0.2",
-    "pino": "^9.9.5"
+    "nodemailer": "^7.0.10",
+    "pino": "^9.9.5",
+    "remove": "^0.1.5",
+    "save-dev": "0.0.1-security",
+    "sharp": "^0.34.5"
   }
 }

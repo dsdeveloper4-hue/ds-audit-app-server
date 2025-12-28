@@ -8,12 +8,51 @@ CREATE TYPE "public"."AuditStatus" AS ENUM ('IN_PROGRESS', 'COMPLETED', 'CANCELE
 CREATE TYPE "public"."ActivityType" AS ENUM ('CREATE', 'UPDATE', 'DELETE', 'READ');
 
 -- CreateTable
+CREATE TABLE "public"."Permission" (
+    "id" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "description" TEXT,
+    "category" TEXT,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Permission_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "public"."RolePermission" (
+    "id" TEXT NOT NULL,
+    "role" "public"."Role" NOT NULL,
+    "permission_id" TEXT NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "RolePermission_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "public"."UserPermission" (
+    "id" TEXT NOT NULL,
+    "user_id" TEXT NOT NULL,
+    "permission_id" TEXT NOT NULL,
+    "granted" BOOLEAN NOT NULL DEFAULT true,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "UserPermission_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "public"."User" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
-    "mobile" TEXT NOT NULL,
-    "password" TEXT NOT NULL,
+    "email" TEXT NOT NULL,
+    "google_id" TEXT,
+    "profile_image" TEXT,
+    "password" TEXT,
     "role" "public"."Role" NOT NULL DEFAULT 'USER',
+    "auth_provider" TEXT NOT NULL DEFAULT 'google',
+    "reset_token" TEXT,
+    "reset_token_expires" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
@@ -24,6 +63,7 @@ CREATE TABLE "public"."User" (
 CREATE TABLE "public"."Room" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
+    "office_name" TEXT,
     "floor" TEXT,
     "department" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -37,8 +77,10 @@ CREATE TABLE "public"."Item" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "category" TEXT,
+    "sub_category" TEXT,
     "unit" TEXT,
     "unit_price" DECIMAL(10,2),
+    "image_url" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
@@ -65,9 +107,12 @@ CREATE TABLE "public"."ItemDetails" (
     "room_id" TEXT NOT NULL,
     "item_id" TEXT NOT NULL,
     "audit_id" TEXT NOT NULL,
+    "item_serial_no" TEXT,
+    "asset_purchase_id" TEXT,
     "active_quantity" INTEGER NOT NULL DEFAULT 0,
     "broken_quantity" INTEGER NOT NULL DEFAULT 0,
     "inactive_quantity" INTEGER NOT NULL DEFAULT 0,
+    "lost_quantity" INTEGER NOT NULL DEFAULT 0,
     "unit_price" DECIMAL(10,2),
     "total_price" DECIMAL(10,2),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -84,8 +129,13 @@ CREATE TABLE "public"."AssetPurchase" (
     "quantity" INTEGER NOT NULL,
     "unit_price" DECIMAL(10,2) NOT NULL,
     "total_cost" DECIMAL(10,2) NOT NULL,
+    "serial_number" TEXT,
     "purchase_date" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "notes" TEXT,
+    "item_image_url" TEXT,
+    "billing_image_url" TEXT,
+    "assigned_by_name" TEXT,
+    "status" TEXT DEFAULT 'Active',
     "added_by" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
@@ -121,16 +171,61 @@ CREATE TABLE "public"."_AuditParticipants" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "User_mobile_key" ON "public"."User"("mobile");
+CREATE UNIQUE INDEX "Permission_name_key" ON "public"."Permission"("name");
+
+-- CreateIndex
+CREATE INDEX "Permission_category_idx" ON "public"."Permission"("category");
+
+-- CreateIndex
+CREATE INDEX "RolePermission_role_idx" ON "public"."RolePermission"("role");
+
+-- CreateIndex
+CREATE INDEX "RolePermission_permission_id_idx" ON "public"."RolePermission"("permission_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "RolePermission_role_permission_id_key" ON "public"."RolePermission"("role", "permission_id");
+
+-- CreateIndex
+CREATE INDEX "UserPermission_user_id_idx" ON "public"."UserPermission"("user_id");
+
+-- CreateIndex
+CREATE INDEX "UserPermission_permission_id_idx" ON "public"."UserPermission"("permission_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "UserPermission_user_id_permission_id_key" ON "public"."UserPermission"("user_id", "permission_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "User_email_key" ON "public"."User"("email");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "User_google_id_key" ON "public"."User"("google_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "User_reset_token_key" ON "public"."User"("reset_token");
+
+-- CreateIndex
+CREATE INDEX "User_email_idx" ON "public"."User"("email");
+
+-- CreateIndex
+CREATE INDEX "User_google_id_idx" ON "public"."User"("google_id");
+
+-- CreateIndex
+CREATE INDEX "User_reset_token_idx" ON "public"."User"("reset_token");
 
 -- CreateIndex
 CREATE INDEX "Room_name_idx" ON "public"."Room"("name");
+
+-- CreateIndex
+CREATE INDEX "Room_office_name_idx" ON "public"."Room"("office_name");
 
 -- CreateIndex
 CREATE INDEX "Item_name_idx" ON "public"."Item"("name");
 
 -- CreateIndex
 CREATE INDEX "Item_category_idx" ON "public"."Item"("category");
+
+-- CreateIndex
+CREATE INDEX "Item_sub_category_idx" ON "public"."Item"("sub_category");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Audit_month_year_key" ON "public"."Audit"("month", "year");
@@ -145,7 +240,13 @@ CREATE INDEX "ItemDetails_item_id_idx" ON "public"."ItemDetails"("item_id");
 CREATE INDEX "ItemDetails_audit_id_idx" ON "public"."ItemDetails"("audit_id");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "ItemDetails_room_id_item_id_audit_id_key" ON "public"."ItemDetails"("room_id", "item_id", "audit_id");
+CREATE INDEX "ItemDetails_item_serial_no_idx" ON "public"."ItemDetails"("item_serial_no");
+
+-- CreateIndex
+CREATE INDEX "ItemDetails_asset_purchase_id_idx" ON "public"."ItemDetails"("asset_purchase_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "ItemDetails_item_serial_no_audit_id_key" ON "public"."ItemDetails"("item_serial_no", "audit_id");
 
 -- CreateIndex
 CREATE INDEX "AssetPurchase_room_id_idx" ON "public"."AssetPurchase"("room_id");
@@ -160,6 +261,9 @@ CREATE INDEX "AssetPurchase_purchase_date_idx" ON "public"."AssetPurchase"("purc
 CREATE INDEX "AssetPurchase_added_by_idx" ON "public"."AssetPurchase"("added_by");
 
 -- CreateIndex
+CREATE INDEX "AssetPurchase_serial_number_idx" ON "public"."AssetPurchase"("serial_number");
+
+-- CreateIndex
 CREATE INDEX "RecentActivityHistory_entity_type_entity_id_idx" ON "public"."RecentActivityHistory"("entity_type", "entity_id");
 
 -- CreateIndex
@@ -172,6 +276,15 @@ CREATE INDEX "RecentActivityHistory_occurred_at_idx" ON "public"."RecentActivity
 CREATE INDEX "_AuditParticipants_B_index" ON "public"."_AuditParticipants"("B");
 
 -- AddForeignKey
+ALTER TABLE "public"."RolePermission" ADD CONSTRAINT "RolePermission_permission_id_fkey" FOREIGN KEY ("permission_id") REFERENCES "public"."Permission"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."UserPermission" ADD CONSTRAINT "UserPermission_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."UserPermission" ADD CONSTRAINT "UserPermission_permission_id_fkey" FOREIGN KEY ("permission_id") REFERENCES "public"."Permission"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "public"."ItemDetails" ADD CONSTRAINT "ItemDetails_room_id_fkey" FOREIGN KEY ("room_id") REFERENCES "public"."Room"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -179,6 +292,9 @@ ALTER TABLE "public"."ItemDetails" ADD CONSTRAINT "ItemDetails_item_id_fkey" FOR
 
 -- AddForeignKey
 ALTER TABLE "public"."ItemDetails" ADD CONSTRAINT "ItemDetails_audit_id_fkey" FOREIGN KEY ("audit_id") REFERENCES "public"."Audit"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."ItemDetails" ADD CONSTRAINT "ItemDetails_asset_purchase_id_fkey" FOREIGN KEY ("asset_purchase_id") REFERENCES "public"."AssetPurchase"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "public"."AssetPurchase" ADD CONSTRAINT "AssetPurchase_added_by_fkey" FOREIGN KEY ("added_by") REFERENCES "public"."User"("id") ON DELETE SET NULL ON UPDATE CASCADE;

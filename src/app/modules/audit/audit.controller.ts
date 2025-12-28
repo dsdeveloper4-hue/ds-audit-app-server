@@ -202,6 +202,18 @@ const getDashboardTotals = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
+const getStatusHistory = catchAsync(async (req: Request, res: Response) => {
+  const { status } = req.params;
+  const result = await auditService.getStatusHistory(status);
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: `${status} status history retrieved successfully!`,
+    data: result,
+  });
+});
+
 export const auditController = {
   createAudit,
   getAllAudits,
@@ -219,4 +231,5 @@ export const auditController = {
   recalculateAuditPrices,
   recalculateLatestAuditPrices,
   getDashboardTotals,
+  getStatusHistory,
 };
